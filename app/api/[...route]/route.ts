@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { handle } from 'hono/vercel'
 import { z } from 'zod'
-import { generateObject } from 'ai'
+import { generateObject, generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import type { Variables } from '../types'
 import { withGithubAuth } from '../middleware'
@@ -54,26 +54,35 @@ app.get('/create', async (c) => {
 
       const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map(f => `\n--- ${f.path} ---\n${f.content}`).join('\n')}`
 
+      const { text: plan } = await generateText({
+        model: openai('gpt-4o'),
+        prompt: `Given this repository content:\n\n${repoContent}\n\nImplement the following feature: ${result.data.prompt}\n\nFirst, create a detailed plan for implementing this feature.`,
+        system: `You are an expert react and pwa developer named Wisp
+
+Your job is to take a simple idea from a user and use that idea to create an app based on a template for a functional PWA app.
+
+The main files you should be editing are:
+
+pwa-assets.config.ts
+vite.config.ts for the app manifest
+
+And all the files under the src directory
+
+Before implementing, think thoroughly about the steps you need to take.
+
+Start by thinking of the styling - in the context of the prompt, how should the app look?
+
+Then think of the actual implementation. You can only make frontend/react changes since this is a vite app.
+
+Make sure everything is typesafe.
+
+You can NEVER install dependencies, you can only edit code`,
+      })
+
       const { object } = await generateObject({
         model: anthropic('claude-3-5-sonnet-latest'),
         schema: fileChangeSchema,
-        prompt: `Given this repository content:\n\n${repoContent}\n\n
-You are tasked with implementing the following feature in this Vite PWA application: ${result.data.prompt}
-
-Please analyze the current repository structure and provide the necessary file changes to implement this feature, following these guidelines:
-
-1. Only include files that need to be modified or created
-2. Ensure PWA functionality remains intact
-3. Follow React and TypeScript best practices
-4. Maintain consistency with the existing codebase structure
-5. Include any necessary dependency changes in package.json
-6. Update configuration files if needed
-
-For each file change, provide:
-- The complete file content
-- A clear description of what changed
-- Any additional setup instructions if required`,
-        system: 'You are an expert React and PWA developer. Generate code changes following modern best practices, focusing on type safety, performance, and progressive enhancement.',
+        prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nProvide the necessary file changes to implement this feature according to the plan. Only include files that need to be modified or created.`,
       })
 
       await GithubService.createCommitWithFiles(
