@@ -130,4 +130,101 @@ export class GithubService {
 
     return `https://github.com/productstudioinc/${newRepoName}`
   }
+
+  static async createCommit(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    branch: string,
+    filePath: string,
+    content: string,
+    message: string
+  ): Promise<void> {
+    try {
+      const { data: branchData } = await octokit.rest.repos.getBranch({
+        owner,
+        repo,
+        branch,
+      })
+
+      await octokit.rest.repos.createOrUpdateFileContents({
+        owner,
+        repo,
+        path: filePath,
+        message,
+        content: Buffer.from(content).toString('base64'),
+        branch,
+        sha: branchData.commit.sha
+      })
+    } catch (error: any) {
+      throw new Error(`Failed to create commit: ${error.message}`)
+    }
+  }
+
+  static async createCommitWithFiles(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    branch: string,
+    files: { path: string; content: string }[],
+    message: string
+  ): Promise<void> {
+    try {
+      const { data: ref } = await octokit.rest.git.getRef({
+        owner,
+        repo,
+        ref: `heads/${branch}`,
+      })
+      const currentCommitSha = ref.object.sha
+
+      const { data: commit } = await octokit.rest.git.getCommit({
+        owner,
+        repo,
+        commit_sha: currentCommitSha,
+      })
+      const currentTreeSha = commit.tree.sha
+
+      const blobs = await Promise.all(
+        files.map(file =>
+          octokit.rest.git.createBlob({
+            owner,
+            repo,
+            content: file.content,
+            encoding: 'utf-8',
+          })
+        )
+      )
+
+      const treeEntries = files.map((file, index) => ({
+        path: file.path,
+        mode: '100644' as const,
+        type: 'blob' as const,
+        sha: blobs[index].data.sha,
+      }))
+
+      const { data: newTree } = await octokit.rest.git.createTree({
+        owner,
+        repo,
+        base_tree: currentTreeSha,
+        tree: treeEntries,
+      })
+
+      const { data: newCommit } = await octokit.rest.git.createCommit({
+        owner,
+        repo,
+        message,
+        tree: newTree.sha,
+        parents: [currentCommitSha],
+      })
+
+      await octokit.rest.git.updateRef({
+        owner,
+        repo,
+        ref: `heads/${branch}`,
+        sha: newCommit.sha,
+      })
+    } catch (error: any) {
+      throw new Error(`Failed to create commit: ${error.message}`)
+    }
+  }
 } 
