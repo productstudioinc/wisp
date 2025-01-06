@@ -7,7 +7,7 @@ import { openai } from '@ai-sdk/openai'
 import type { Variables } from '../types'
 import { withGithubAuth } from '../middleware'
 import { GithubService } from '../services/github'
-
+import { anthropic } from '@ai-sdk/anthropic'
 export const runtime = 'edge'
 
 const createRequestSchema = z.object({
@@ -55,10 +55,25 @@ app.get('/create', async (c) => {
       const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map(f => `\n--- ${f.path} ---\n${f.content}`).join('\n')}`
 
       const { object } = await generateObject({
-        model: openai('gpt-4o'),
+        model: anthropic('claude-3-5-sonnet-latest'),
         schema: fileChangeSchema,
-        prompt: `Given this repository content:\n\n${repoContent}\n\nImplement the following feature: ${result.data.prompt}\n\nProvide the necessary file changes to implement this feature. Only include files that need to be modified or created.`,
-        system: 'You are an expert developer. Generate code changes following best practices. Focus on modifying only the necessary files.',
+        prompt: `Given this repository content:\n\n${repoContent}\n\n
+You are tasked with implementing the following feature in this Vite PWA application: ${result.data.prompt}
+
+Please analyze the current repository structure and provide the necessary file changes to implement this feature, following these guidelines:
+
+1. Only include files that need to be modified or created
+2. Ensure PWA functionality remains intact
+3. Follow React and TypeScript best practices
+4. Maintain consistency with the existing codebase structure
+5. Include any necessary dependency changes in package.json
+6. Update configuration files if needed
+
+For each file change, provide:
+- The complete file content
+- A clear description of what changed
+- Any additional setup instructions if required`,
+        system: 'You are an expert React and PWA developer. Generate code changes following modern best practices, focusing on type safety, performance, and progressive enhancement.',
       })
 
       await GithubService.createCommitWithFiles(
