@@ -2,6 +2,7 @@ import micromatch from 'micromatch'
 import type { TreeItem, GithubContent, OctokitClient } from '../types'
 import { DEFAULT_IGNORE_PATTERNS } from '../constants'
 
+// biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
 export class GithubService {
   private static shouldIgnorePath(path: string): boolean {
     return micromatch.isMatch(path, DEFAULT_IGNORE_PATTERNS, { dot: true })
@@ -13,16 +14,16 @@ export class GithubService {
       const isLast = index === tree.length - 1
       const connector = isLast ? '└── ' : '├── '
       result += `${prefix}${connector}${item.name}\n`
-      
+
       if (item.children) {
         const newPrefix = prefix + (isLast ? '    ' : '│   ')
-        result += this.generateTreeString(item.children, newPrefix)
+        result += GithubService.generateTreeString(item.children, newPrefix)
       }
     })
     return result
   }
 
-  private static async fetchGithubTree(octokit: OctokitClient, owner: string, repo: string, path: string = ''): Promise<TreeItem[]> {
+  private static async fetchGithubTree(octokit: OctokitClient, owner: string, repo: string, path = ''): Promise<TreeItem[]> {
     const response = await octokit.rest.repos.getContent({
       owner,
       repo,
@@ -33,12 +34,12 @@ export class GithubService {
     const result: TreeItem[] = []
 
     for (const item of items) {
-      if (this.shouldIgnorePath(item.path)) {
+      if (GithubService.shouldIgnorePath(item.path)) {
         continue
       }
 
       if (item.type === 'dir') {
-        const children = await this.fetchGithubTree(octokit, owner, repo, item.path)
+        const children = await GithubService.fetchGithubTree(octokit, owner, repo, item.path)
         if (children.length > 0) {
           result.push({
             type: 'dir',
@@ -82,8 +83,8 @@ export class GithubService {
     const path = urlParts.slice(2).join('/')
 
     try {
-      const tree = await this.fetchGithubTree(octokit, owner, repo, path)
-      const treeString = this.generateTreeString([{
+      const tree = await GithubService.fetchGithubTree(octokit, owner, repo, path)
+      const treeString = GithubService.generateTreeString([{
         type: 'dir',
         name: `${repo}/`,
         path: '',
@@ -91,7 +92,7 @@ export class GithubService {
       }])
 
       const files: { path: string, content: string }[] = []
-      
+
       async function collectFiles(items: TreeItem[]) {
         for (const item of items) {
           if (item.type === 'file' && !GithubService.shouldIgnorePath(item.path)) {
@@ -113,6 +114,7 @@ export class GithubService {
         tree: treeString,
         files
       }
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     } catch (error: any) {
       throw new Error(`Failed to fetch GitHub content: ${error.message}`)
     }
@@ -156,6 +158,7 @@ export class GithubService {
         branch,
         sha: branchData.commit.sha
       })
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     } catch (error: any) {
       throw new Error(`Failed to create commit: ${error.message}`)
     }
@@ -223,6 +226,7 @@ export class GithubService {
         ref: `heads/${branch}`,
         sha: newCommit.sha,
       })
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     } catch (error: any) {
       throw new Error(`Failed to create commit: ${error.message}`)
     }

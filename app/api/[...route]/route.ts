@@ -30,7 +30,7 @@ app.use('*', withGithubAuth)
 app.get('/create', async (c) => {
   const query = c.req.query()
   const result = createRequestSchema.safeParse({ name: query.name, prompt: query.prompt })
-  
+
   if (!result.success) {
     throw new HTTPException(400, { message: 'Invalid repository name' })
   }
@@ -39,7 +39,7 @@ app.get('/create', async (c) => {
     const octokit = c.get('octokit')
     const templateOwner = 'productstudioinc'
     const templateRepo = 'vite_react_shadcn_pwa'
-    
+
     const newRepoUrl = await GithubService.createFromTemplate(
       octokit,
       templateOwner,
@@ -51,9 +51,8 @@ app.get('/create', async (c) => {
 
     if (result.data.prompt) {
       const { tree, files } = await GithubService.getContent(octokit, newRepoUrl)
-      
-      const repoContent = `Directory structure:\n${tree}\n\nFiles:\n` + 
-        files.map(f => `\n--- ${f.path} ---\n${f.content}`).join('\n')
+
+      const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map(f => `\n--- ${f.path} ---\n${f.content}`).join('\n')}`
 
       const { object } = await generateObject({
         model: openai('gpt-4o'),
@@ -75,13 +74,13 @@ app.get('/create', async (c) => {
     }
 
     const { tree, files } = await GithubService.getContent(octokit, newRepoUrl)
-    
+
     let output = "Created new repository from template!\n\n"
     output += `Repository URL: ${newRepoUrl}\n\n`
     output += "Directory structure:\n\n"
     output += tree
     output += "\n\n"
-    
+
     for (const file of files) {
       output += "================================================\n"
       output += `File: /${file.path}\n`
@@ -91,6 +90,7 @@ app.get('/create', async (c) => {
     }
 
     return c.text(output)
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   } catch (error: any) {
     throw new HTTPException(500, { message: error.message })
   }
