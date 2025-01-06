@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { HTTPException } from 'hono/http-exception'
 import { handle } from 'hono/vercel'
 import { z } from 'zod'
 import type { Variables } from '../types'
@@ -20,7 +21,7 @@ app.get('/create', async (c) => {
   const result = createRequestSchema.safeParse({ url: query.url })
   
   if (!result.success) {
-    return c.json({ message: 'Invalid GitHub URL' }, 400)
+    throw new HTTPException(400, { message: 'Invalid GitHub URL' })
   }
 
   try {
@@ -41,7 +42,7 @@ app.get('/create', async (c) => {
 
     return c.text(output)
   } catch (error: any) {
-    return c.json({ message: error.message }, 500)
+    throw new HTTPException(500, { message: error.message })
   }
 })
 
