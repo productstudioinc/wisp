@@ -22,6 +22,11 @@ export type OctokitClient = Octokit & {
     repos: {
       getContent: (params: RestEndpointMethodTypes['repos']['getContent']['parameters']) => 
         Promise<RestEndpointMethodTypes['repos']['getContent']['response']>
+      createUsingTemplate: (params: RestEndpointMethodTypes['repos']['createUsingTemplate']['parameters']) =>
+        Promise<RestEndpointMethodTypes['repos']['createUsingTemplate']['response']>
+    }
+    users: {
+      getAuthenticated: () => Promise<RestEndpointMethodTypes['users']['getAuthenticated']['response']>
     }
   }
 } 

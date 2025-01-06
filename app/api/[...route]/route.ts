@@ -9,7 +9,7 @@ import { GithubService } from '../services/github'
 export const runtime = 'edge'
 
 const createRequestSchema = z.object({
-  url: z.string().url().startsWith('https://github.com/')
+  name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens')
 })
 
 const app = new Hono<{ Variables: Variables }>().basePath('/api')
@@ -18,17 +18,31 @@ app.use('*', withGithubAuth)
 
 app.get('/create', async (c) => {
   const query = c.req.query()
-  const result = createRequestSchema.safeParse({ url: query.url })
+  const result = createRequestSchema.safeParse({ name: query.name })
   
   if (!result.success) {
-    throw new HTTPException(400, { message: 'Invalid GitHub URL' })
+    throw new HTTPException(400, { message: 'Invalid repository name' })
   }
 
   try {
     const octokit = c.get('octokit')
-    const { tree, files } = await GithubService.getContent(octokit, result.data.url)
+    const templateOwner = 'productstudioinc'
+    const templateRepo = 'vite_react_shadcn_pwa'
     
-    let output = "Directory structure:\n\n"
+    const newRepoUrl = await GithubService.createFromTemplate(
+      octokit,
+      templateOwner,
+      templateRepo,
+      result.data.name
+    )
+
+    await new Promise(resolve => setTimeout(resolve, 2000))
+
+    const { tree, files } = await GithubService.getContent(octokit, newRepoUrl)
+    
+    let output = "Created new repository from template!\n\n"
+    output += `Repository URL: ${newRepoUrl}\n\n`
+    output += "Directory structure:\n\n"
     output += tree
     output += "\n\n"
     

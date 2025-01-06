@@ -117,4 +117,17 @@ export class GithubService {
       throw new Error(`Failed to fetch GitHub content: ${error.message}`)
     }
   }
+
+  static async createFromTemplate(octokit: OctokitClient, templateOwner: string, templateRepo: string, newRepoName: string): Promise<string> {
+    await octokit.rest.repos.createUsingTemplate({
+      template_owner: templateOwner,
+      template_repo: templateRepo,
+      owner: 'productstudioinc',
+      name: newRepoName,
+      private: false,
+      include_all_branches: false
+    })
+
+    return `https://github.com/productstudioinc/${newRepoName}`
+  }
 } 
