@@ -6,7 +6,7 @@ import { generateObject, generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import type { Variables } from '../types'
 import { withGithubAuth } from '../middleware'
-import { GithubService } from '../services/github'
+import { createFromTemplate, getContent, createCommitWithFiles } from '../services/github'
 import { anthropic } from '@ai-sdk/anthropic'
 export const runtime = 'edge'
 
@@ -40,7 +40,7 @@ app.get('/create', async (c) => {
     const templateOwner = 'productstudioinc'
     const templateRepo = 'vite_react_shadcn_pwa'
 
-    const newRepoUrl = await GithubService.createFromTemplate(
+    const newRepoUrl = await createFromTemplate(
       octokit,
       templateOwner,
       templateRepo,
@@ -50,9 +50,9 @@ app.get('/create', async (c) => {
     await new Promise(resolve => setTimeout(resolve, 2000))
 
     if (result.data.prompt) {
-      const { tree, files } = await GithubService.getContent(octokit, newRepoUrl)
+      const { tree, files } = await getContent(octokit, newRepoUrl)
 
-      const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map(f => `\n--- ${f.path} ---\n${f.content}`).join('\n')}`
+      const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map((f: { path: string; content: string }) => `\n--- ${f.path} ---\n${f.content}`).join('\n')}`
 
       const { text: plan } = await generateText({
         model: openai('gpt-4o'),
@@ -85,7 +85,7 @@ You can NEVER install dependencies, you can only edit code`,
         prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nProvide the necessary file changes to implement this feature according to the plan. Only include files that need to be modified or created.`,
       })
 
-      await GithubService.createCommitWithFiles(
+      await createCommitWithFiles(
         octokit,
         'productstudioinc',
         result.data.name,
@@ -97,7 +97,7 @@ You can NEVER install dependencies, you can only edit code`,
       await new Promise(resolve => setTimeout(resolve, 2000))
     }
 
-    const { tree, files } = await GithubService.getContent(octokit, newRepoUrl)
+    const { tree, files } = await getContent(octokit, newRepoUrl)
 
     let output = "Created new repository from template!\n\n"
     output += `Repository URL: ${newRepoUrl}\n\n`
@@ -114,7 +114,6 @@ You can NEVER install dependencies, you can only edit code`,
     }
 
     return c.text(output)
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   } catch (error: any) {
     throw new HTTPException(500, { message: error.message })
   }

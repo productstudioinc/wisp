@@ -10,6 +10,7 @@
     "@ai-sdk/openai": "^1.0.13",
     "@types/micromatch": "^4.0.9",
     "ai": "^4.0.26",
+    "cloudflare": "^3.5.0",
     "hono": "^4.6.16",
     "micromatch": "^4.0.8",
     "next": "^15.1.3",
