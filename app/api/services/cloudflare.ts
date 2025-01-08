@@ -8,9 +8,10 @@ export async function createDomainRecord(domainPrefix: string) {
       type: 'CNAME',
       name: domainPrefix,
       zone_id: process.env.CLOUDFLARE_ZONE_ID as string,
-      proxied: true,
+      proxied: false,
       content: 'cname.vercel-dns.com.'
     })
+    if (!result.id) throw new Error('Failed to create DNS record')
     return result.id
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error))

@@ -75,19 +75,51 @@ export async function checkDeploymentStatus(projectId: string) {
       limit: 1,
     })
 
-    const deploymentLogs = await vercel.deployments.getDeploymentEvents({
-      idOrUrl: deployment.deployments[0].url,
-      teamId: 'product-studio',
-      direction: 'backward',
-      limit: 5
-    })
 
-    console.log(deploymentLogs)
-
-    return {
-      state: deployment.deployments[0].readyState,
-      logs: deploymentLogs
+    if (!deployment.deployments.length) {
+      return { state: 'NO_DEPLOYMENTS' }
     }
+
+    const state = deployment.deployments[0].readyState
+
+    if (state === 'ERROR') {
+      const deploymentUrl = deployment.deployments[0].url
+      const response = await fetch(
+        `https://api.vercel.com/v3/deployments/${deploymentUrl}/events?builds=1&direction=backward&follow=0&limit=20`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.VERCEL_BEARER_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+
+      const deploymentLogs = (await response.json()) as Array<{
+        text: string;
+        type: string;
+        created: number;
+        date: number;
+        deploymentId: string;
+        id: string;
+        serial: string;
+        info: {
+          type: string;
+          name: string;
+          entrypoint: string;
+        };
+        level?: 'error';
+      }>
+
+      const formattedLogs = deploymentLogs
+        .reverse()
+        .filter(log => log.level === 'error')
+        .map(log => log.text)
+        .filter(text => text)
+
+      return { state, logs: formattedLogs }
+    }
+
+    return { state }
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error))
   }
