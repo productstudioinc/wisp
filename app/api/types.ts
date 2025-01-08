@@ -1,5 +1,3 @@
-import type { RequestParameters } from '@octokit/types'
-import type { OctokitResponse } from '@octokit/types'
 import type { Octokit } from '@octokit/rest'
 
 export type TreeItem = {
@@ -16,4 +14,4 @@ export type GithubContent = {
 
 export type Variables = {
   octokit: Octokit
-} 
+}

@@ -66,3 +66,29 @@ export async function deleteProject(projectId: string) {
     throw error instanceof Error ? error : new Error(String(error))
   }
 }
+
+export async function checkDeploymentStatus(projectId: string) {
+  try {
+    const deployment = await vercel.deployments.getDeployments({
+      projectId: projectId,
+      teamId: 'product-studio',
+      limit: 1,
+    })
+
+    const deploymentLogs = await vercel.deployments.getDeploymentEvents({
+      idOrUrl: deployment.deployments[0].url,
+      teamId: 'product-studio',
+      direction: 'backward',
+      limit: 5
+    })
+
+    console.log(deploymentLogs)
+
+    return {
+      state: deployment.deployments[0].readyState,
+      logs: deploymentLogs
+    }
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}

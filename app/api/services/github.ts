@@ -2,6 +2,7 @@ import micromatch from 'micromatch'
 import type { TreeItem, GithubContent } from '../types'
 import { DEFAULT_IGNORE_PATTERNS } from '../constants'
 import type { Octokit } from '@octokit/rest'
+import { parsePatch, applyPatch } from 'diff'
 
 function shouldIgnorePath(path: string): boolean {
   return micromatch.isMatch(path, DEFAULT_IGNORE_PATTERNS, { dot: true })
@@ -62,7 +63,7 @@ async function fetchGithubTree(octokit: Octokit, owner: string, repo: string, pa
   })
 }
 
-async function fetchFileContent(octokit: Octokit, owner: string, repo: string, path: string): Promise<string> {
+export async function fetchFileContent(octokit: Octokit, owner: string, repo: string, path: string): Promise<string> {
   const response = await octokit.rest.repos.getContent({
     owner,
     repo,
@@ -175,38 +176,32 @@ export async function createCommitWithFiles(
       repo,
       ref: `heads/${branch}`,
     })
-    const currentCommitSha = ref.object.sha
-
-    const { data: commit } = await octokit.rest.git.getCommit({
-      owner,
-      repo,
-      commit_sha: currentCommitSha,
-    })
-    const currentTreeSha = commit.tree.sha
 
     const blobs = await Promise.all(
-      files.map(file =>
-        octokit.rest.git.createBlob({
+      files.map(async file => {
+        const normalizedPath = file.path.replace(/^\/+/, '')
+
+        const { data: blob } = await octokit.rest.git.createBlob({
           owner,
           repo,
           content: file.content,
           encoding: 'utf-8',
         })
-      )
-    )
 
-    const treeEntries = files.map((file, index) => ({
-      path: file.path,
-      mode: '100644' as const,
-      type: 'blob' as const,
-      sha: blobs[index].data.sha,
-    }))
+        return {
+          path: normalizedPath,
+          mode: '100644' as const,
+          type: 'blob' as const,
+          sha: blob.sha,
+        }
+      })
+    )
 
     const { data: newTree } = await octokit.rest.git.createTree({
       owner,
       repo,
-      base_tree: currentTreeSha,
-      tree: treeEntries,
+      base_tree: ref.object.sha,
+      tree: blobs,
     })
 
     const { data: newCommit } = await octokit.rest.git.createCommit({
@@ -214,7 +209,7 @@ export async function createCommitWithFiles(
       repo,
       message,
       tree: newTree.sha,
-      parents: [currentCommitSha],
+      parents: [ref.object.sha],
     })
 
     await octokit.rest.git.updateRef({
@@ -225,6 +220,93 @@ export async function createCommitWithFiles(
     })
   } catch (error: any) {
     throw new Error(`Failed to create commit: ${error.message}`)
+  }
+}
+
+export async function createCommitWithPatches(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  branch: string,
+  changes: { path: string; patch: string }[],
+  message: string
+): Promise<void> {
+  try {
+    const { data: ref } = await octokit.rest.git.getRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+    })
+
+    const tree = []
+    for (const change of changes) {
+      let newContent: string
+      try {
+        const { data: currentFile } = await octokit.rest.repos.getContent({
+          owner,
+          repo,
+          path: change.path,
+          ref: ref.object.sha
+        })
+
+        if (!('content' in currentFile)) {
+          throw new Error(`${change.path} is not a file`)
+        }
+
+        const currentContent = Buffer.from(currentFile.content, 'base64').toString()
+        const parsedPatch = parsePatch(change.patch)
+        const patchResult = applyPatch(currentContent, parsedPatch[0])
+        if (patchResult === false) {
+          throw new Error(`Failed to apply patch to ${change.path}`)
+        }
+        newContent = patchResult
+      } catch (e) {
+        newContent = change.patch
+          .split('\n')
+          .filter(line => line.startsWith('+'))
+          .map(line => line.slice(1))
+          .join('\n')
+      }
+
+      const { data: blob } = await octokit.rest.git.createBlob({
+        owner,
+        repo,
+        content: newContent,
+        encoding: 'utf-8',
+      })
+
+      const normalizedPath = change.path.replace(/^\/+/, '')
+      tree.push({
+        path: normalizedPath,
+        mode: '100644' as const,
+        type: 'blob' as const,
+        sha: blob.sha,
+      })
+    }
+
+    const { data: newTree } = await octokit.rest.git.createTree({
+      owner,
+      repo,
+      base_tree: ref.object.sha,
+      tree,
+    })
+
+    const { data: newCommit } = await octokit.rest.git.createCommit({
+      owner,
+      repo,
+      message,
+      tree: newTree.sha,
+      parents: [ref.object.sha],
+    })
+
+    await octokit.rest.git.updateRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+      sha: newCommit.sha,
+    })
+  } catch (error: any) {
+    throw new Error(`Failed to create commit with patches: ${error.message}`)
   }
 }
 

@@ -2,14 +2,14 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { handle } from 'hono/vercel'
 import { z } from 'zod'
-import { generateObject, generateText } from 'ai'
-import { openai } from '@ai-sdk/openai'
 import type { Variables } from '../types'
 import { withGithubAuth } from '../middleware'
 import { createFromTemplate, getContent, createCommitWithFiles, deleteRepository } from '../services/github'
-import { setupVercelProject, addDomainToProject, checkDomainStatus, deleteProject } from '../services/vercel'
+import { setupVercelProject, addDomainToProject, checkDomainStatus, deleteProject, checkDeploymentStatus } from '../services/vercel'
 import { createDomainRecord, deleteDomainRecord } from '../services/cloudflare'
-import { anthropic } from '@ai-sdk/anthropic'
+import { generateImplementationPlan, generateCodeChanges, applyChangesToFiles, generateDeploymentErrorFix } from '../services/ai'
+import type { Octokit } from '@octokit/rest'
+
 export const runtime = 'edge'
 
 const createRequestSchema = z.object({
@@ -26,7 +26,12 @@ const deleteRequestSchema = z.object({
 const fileChangeSchema = z.object({
   changes: z.array(z.object({
     path: z.string().describe('The path to the file relative to the repository root'),
-    content: z.string().describe('The complete content of the file'),
+    changes: z.array(z.object({
+      type: z.enum(['add', 'remove', 'replace']).describe('The type of change to make'),
+      start: z.number().describe('The line number where the change starts (1-indexed)'),
+      end: z.number().optional().describe('The line number where the change ends (for replace/remove)'),
+      content: z.string().describe('The new content to add (for add/replace)')
+    })),
     description: z.string().describe('A brief description of what changed in this file')
   }))
 })
@@ -61,6 +66,57 @@ app.delete('/repositories/:name', async (c) => {
   }
 })
 
+async function waitForDeployment(projectId: string, octokit: Octokit, repoName: string, maxAttempts = 20): Promise<{ success: boolean; error?: string }> {
+  let attempts = 0
+  while (attempts < maxAttempts) {
+    const { state, logs } = await checkDeploymentStatus(projectId)
+    console.log(`Deployment status: ${state}${logs ? ` (Logs: ${logs})` : ''}`)
+
+    switch (state) {
+      case 'READY':
+        return { success: true }
+      case 'ERROR':
+        return { success: false, error: logs || 'Unknown deployment error' }
+      case 'CANCELED':
+      case 'DELETED':
+        return { success: false, error: `Deployment ${state.toLowerCase()}` }
+      default:
+        await new Promise(resolve => setTimeout(resolve, 5000))
+        attempts++
+    }
+  }
+  return { success: false, error: 'Deployment timeout' }
+}
+
+async function handleDeploymentError(error: string, octokit: Octokit, repoName: string, repoUrl: string): Promise<boolean> {
+  console.log('[!] Attempting to fix deployment error:', error)
+
+  const { tree, files } = await getContent(octokit, repoUrl)
+  const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map((f: { path: string; content: string }) => `\n--- ${f.path} ---\n${f.content}`).join('\n')}`
+
+  const changes = await generateDeploymentErrorFix(repoContent, error)
+  console.log('[✓] Fix changes generated')
+
+  if (changes.changes.length === 0) {
+    console.log('[!] No fixes could be generated')
+    return false
+  }
+
+  const patchChanges = await applyChangesToFiles(octokit, 'productstudioinc', repoName, changes.changes)
+
+  await createCommitWithFiles(
+    octokit,
+    'productstudioinc',
+    repoName,
+    'main',
+    patchChanges,
+    `fix: deployment error\n\n${error}\n\n${changes.changes.map(c => `- ${c.description}`).join('\n')}`
+  )
+  console.log('[✓] Fix changes committed')
+
+  return true
+}
+
 app.post('/repositories', async (c) => {
   const body = await createRequestSchema.parseAsync(await c.req.json())
 
@@ -69,7 +125,7 @@ app.post('/repositories', async (c) => {
     const templateOwner = 'productstudioinc'
     const templateRepo = 'vite_react_shadcn_pwa'
 
-    console.log(`[1/6] Creating repository from template: ${body.name}`)
+    console.log(`[1/7] Creating repository from template: ${body.name}`)
     const newRepoUrl = await createFromTemplate(
       octokit,
       templateOwner,
@@ -80,73 +136,45 @@ app.post('/repositories', async (c) => {
 
     await new Promise(resolve => setTimeout(resolve, 2000))
 
-    console.log('[2/6] Setting up Vercel project')
+    console.log('[2/7] Setting up Vercel project')
     const { projectId, deploymentUrl } = await setupVercelProject(body.name)
     console.log(`[✓] Vercel project created: ${deploymentUrl}`)
 
-    console.log('[3/6] Setting up custom domain')
+    console.log('[3/7] Setting up custom domain')
     await addDomainToProject(projectId, body.name)
     console.log('[✓] Domain added to Vercel project')
 
-    console.log('[4/6] Creating DNS record')
+    console.log('[4/7] Creating DNS record')
     const dnsRecordId = await createDomainRecord(body.name)
     console.log('[✓] DNS record created in Cloudflare')
 
     if (body.prompt) {
-      console.log(`[5/6] Generating AI changes for prompt: ${body.prompt}`)
+      console.log(`[5/7] Generating AI changes for prompt: ${body.prompt}`)
       const { tree, files } = await getContent(octokit, newRepoUrl)
-
       const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map((f: { path: string; content: string }) => `\n--- ${f.path} ---\n${f.content}`).join('\n')}`
 
-      const { text: plan } = await generateText({
-        model: openai('gpt-4o'),
-        prompt: `Given this repository content:\n\n${repoContent}\n\nImplement the following feature: ${body.prompt}\n\nFirst, create a detailed plan for implementing this feature.`,
-        system: `You are an expert react and pwa developer named Wisp
-
-        Your job is to take a simple idea from a user and use that idea to create an app based on a template for a functional PWA app.
-
-        The main files you should be editing are:
-
-        pwa-assets.config.ts
-        vite.config.ts for the app manifest
-
-        And all the files under the src directory
-
-        Before implementing, think thoroughly about the steps you need to take.
-
-        Start by thinking of the styling - in the context of the prompt, how should the app look?
-
-        Then think of the actual implementation. You can only make frontend/react changes since this is a vite app.
-
-        Make sure everything is typesafe.
-
-        You can NEVER install dependencies, you can only edit code`,
-      })
+      const plan = await generateImplementationPlan(repoContent, body.prompt)
       console.log('[✓] Implementation plan generated')
 
-      const { object } = await generateObject({
-        model: openai('gpt-4o', {
-          structuredOutputs: true
-        }),
-        schema: fileChangeSchema,
-        prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nProvide the necessary file changes to implement this feature according to the plan. Only include files that need to be modified or created.`,
-      })
+      const changes = await generateCodeChanges(plan, repoContent)
       console.log('[✓] Code changes generated')
+
+      const patchChanges = await applyChangesToFiles(octokit, 'productstudioinc', body.name, changes.changes)
 
       await createCommitWithFiles(
         octokit,
         'productstudioinc',
         body.name,
         'main',
-        object.changes,
-        `feat: ${body.prompt}\n\n${object.changes.map(c => `- ${c.description}`).join('\n')}`
+        patchChanges,
+        `feat: ${body.prompt}\n\n${changes.changes.map(c => `- ${c.description}`).join('\n')}`
       )
       console.log('[✓] Changes committed to repository')
 
       await new Promise(resolve => setTimeout(resolve, 2000))
     }
 
-    console.log('[6/6] Waiting for domain verification')
+    console.log('[6/7] Waiting for domain verification')
     let isVerified = false
     let attempts = 0
     while (!isVerified && attempts < 10) {
@@ -158,6 +186,35 @@ app.post('/repositories', async (c) => {
       }
     }
     console.log(isVerified ? '[✓] Domain verified successfully' : '[!] Domain verification timed out')
+
+    console.log('[7/7] Checking deployment status')
+    const maxFixAttempts = 3
+    let fixAttempts = 0
+
+    while (fixAttempts < maxFixAttempts) {
+      const deploymentStatus = await waitForDeployment(projectId, octokit, body.name)
+
+      if (deploymentStatus.success) {
+        console.log('[✓] Deployment successful')
+        break
+      }
+
+      if (!deploymentStatus.error) {
+        console.log('[!] Deployment failed without error message')
+        break
+      }
+
+      console.log(`[!] Deployment failed (attempt ${fixAttempts + 1}/${maxFixAttempts}): ${deploymentStatus.error}`)
+
+      const fixed = await handleDeploymentError(deploymentStatus.error, octokit, body.name, newRepoUrl)
+      if (!fixed) {
+        console.log('[!] Could not generate fixes for deployment error')
+        break
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 5000)) // Wait for new deployment to start
+      fixAttempts++
+    }
 
     const customDomain = `${body.name}.usewisp.app`
 
