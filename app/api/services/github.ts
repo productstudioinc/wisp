@@ -1,6 +1,7 @@
 import micromatch from 'micromatch'
-import type { TreeItem, GithubContent, OctokitClient } from '../types'
+import type { TreeItem, GithubContent } from '../types'
 import { DEFAULT_IGNORE_PATTERNS } from '../constants'
+import type { Octokit } from '@octokit/rest'
 
 function shouldIgnorePath(path: string): boolean {
   return micromatch.isMatch(path, DEFAULT_IGNORE_PATTERNS, { dot: true })
@@ -21,7 +22,7 @@ function generateTreeString(tree: TreeItem[], prefix = ''): string {
   return result
 }
 
-async function fetchGithubTree(octokit: OctokitClient, owner: string, repo: string, path = ''): Promise<TreeItem[]> {
+async function fetchGithubTree(octokit: Octokit, owner: string, repo: string, path = ''): Promise<TreeItem[]> {
   const response = await octokit.rest.repos.getContent({
     owner,
     repo,
@@ -61,7 +62,7 @@ async function fetchGithubTree(octokit: OctokitClient, owner: string, repo: stri
   })
 }
 
-async function fetchFileContent(octokit: OctokitClient, owner: string, repo: string, path: string): Promise<string> {
+async function fetchFileContent(octokit: Octokit, owner: string, repo: string, path: string): Promise<string> {
   const response = await octokit.rest.repos.getContent({
     owner,
     repo,
@@ -74,7 +75,7 @@ async function fetchFileContent(octokit: OctokitClient, owner: string, repo: str
   throw new Error('Not a file')
 }
 
-export async function getContent(octokit: OctokitClient, url: string): Promise<GithubContent> {
+export async function getContent(octokit: Octokit, url: string): Promise<GithubContent> {
   const urlParts = url.replace('https://github.com/', '').split('/')
   const owner = urlParts[0]
   const repo = urlParts[1]
@@ -117,7 +118,7 @@ export async function getContent(octokit: OctokitClient, url: string): Promise<G
   }
 }
 
-export async function createFromTemplate(octokit: OctokitClient, templateOwner: string, templateRepo: string, newRepoName: string): Promise<string> {
+export async function createFromTemplate(octokit: Octokit, templateOwner: string, templateRepo: string, newRepoName: string): Promise<string> {
   await octokit.rest.repos.createUsingTemplate({
     template_owner: templateOwner,
     template_repo: templateRepo,
@@ -131,7 +132,7 @@ export async function createFromTemplate(octokit: OctokitClient, templateOwner: 
 }
 
 export async function createCommit(
-  octokit: OctokitClient,
+  octokit: Octokit,
   owner: string,
   repo: string,
   branch: string,
@@ -161,7 +162,7 @@ export async function createCommit(
 }
 
 export async function createCommitWithFiles(
-  octokit: OctokitClient,
+  octokit: Octokit,
   owner: string,
   repo: string,
   branch: string,
@@ -224,5 +225,20 @@ export async function createCommitWithFiles(
     })
   } catch (error: any) {
     throw new Error(`Failed to create commit: ${error.message}`)
+  }
+}
+
+export async function deleteRepository(
+  octokit: Octokit,
+  owner: string,
+  repo: string
+): Promise<void> {
+  try {
+    await octokit.rest.repos.delete({
+      owner,
+      repo,
+    })
+  } catch (error: any) {
+    throw new Error(`Failed to delete repository: ${error.message}`)
   }
 } 
