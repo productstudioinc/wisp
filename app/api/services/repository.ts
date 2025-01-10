@@ -56,8 +56,7 @@ async function handleAIChanges(
     (f: { path: string; content: string }) => `\n--- ${f.path} ---\n${f.content}`
   ).join('\n')}`
 
-  const plan = await generateImplementationPlan(repoContent, prompt)
-  const changes = await generateCodeChanges(plan, repoContent)
+  const changes = await generateCodeChanges(prompt, repoContent)
 
   const patchFiles = changes.changes.map(change => ({
     path: change.path,

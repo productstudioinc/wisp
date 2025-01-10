@@ -3,7 +3,8 @@ import { generateObject, generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import type { Octokit } from '@octokit/rest'
 import { fetchFileContent } from './github'
-
+import { observe } from '@lmnr-ai/lmnr'
+import { anthropic } from '@ai-sdk/anthropic'
 const fileChangeSchema = z.object({
   changes: z.array(z.object({
     path: z.string().describe('The path to the file relative to the repository root'),
@@ -60,64 +61,55 @@ export async function generateImplementationPlan(repoContent: string, prompt: st
   return plan
 }
 
-export async function generateCodeChanges(plan: string, repoContent: string) {
-  const { object } = await generateObject({
-    model: openai('gpt-4o'),
-    schema: fileChangeSchema,
-    prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\n
-Generate the necessary file changes to implement this feature. For each file that needs to be modified or created:
+export async function generateCodeChanges(prompt: string, repoContent: string) {
+  return await observe(
+    { name: 'generate-code-changes' },
+    async (prompt: string, repoContent: string) => {
+      const { text: plan } = await observe(
+        { name: 'generate-implementation-plan' },
+        async () => await generateText({
+          model: anthropic('claude-3-5-sonnet-latest'),
+          prompt: `Given this repository content:\n\n${repoContent}\n\nCreate a detailed implementation plan for the following app: ${prompt}`,
+          system: systemPrompt(),
+          experimental_telemetry: {
+            isEnabled: true
+          }
+        })
+      )
 
-1. For each change in a file, specify:
-   - The type of change (add/remove/replace)
-   - The line number where the change starts
-   - For replace/remove: the line number where it ends
-   - For add/replace: the new content to add
+      const { text: implementation } = await observe(
+        { name: 'generate-implementation-text' },
+        async () => await generateText({
+          model: anthropic('claude-3-5-sonnet-latest'),
+          prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app.`,
+          system: implementationSystemPrompt(),
+          experimental_telemetry: {
+            isEnabled: true
+          }
+        })
+      )
 
-2. For new files:
-   - Use a single 'add' change starting at line 1
-   - Include the complete file content
+      const { object } = await observe(
+        { name: 'generate-code-object' },
+        async () => await generateObject({
+          model: openai('gpt-4o-mini'),
+          schema: fileChangeSchema,
+          prompt: implementation,
+          system: 'You are an expert react and pwa developer named Wisp. You will be given a detailed implementation plan and you will need to generate the specific code changes to implement it based on the diff information provided.',
+          experimental_telemetry: {
+            isEnabled: true
+          }
+        })
+      )
 
-3. For modifications:
-   - Break down your changes into specific regions
-   - Include enough context in the content
-   - Use line numbers from the original file
-
-Example of changes to an existing file:
-{
-  "path": "src/App.tsx",
-  "changes": [
-    {
-      "type": "replace",
-      "start": 5,
-      "end": 7,
-      "content": "function App() {\\n  const [count, setCount] = useState(0);\\n  return <div>{count}</div>;\\n}"
+      return {
+        plan,
+        changes: object.changes
+      }
     },
-    {
-      "type": "add",
-      "start": 3,
-      "content": "import { useState } from 'react';\\n"
-    }
-  ],
-  "description": "Added counter state to App component"
-}
-
-Example of a new file:
-{
-  "path": "src/styles.css",
-  "changes": [
-    {
-      "type": "add",
-      "start": 1,
-      "content": ".container {\\n  display: flex;\\n  padding: 1rem;\\n}"
-    }
-  ],
-  "description": "Created styles for container layout"
-}
-
-Only include files that need to be modified or created. Break down your changes into specific regions rather than rewriting entire files.`,
-  })
-
-  return object
+    prompt,
+    repoContent
+  )
 }
 
 export async function applyChangesToFiles(
@@ -176,4 +168,147 @@ Only include files that need to be modified to fix the error. Break down your ch
   })
 
   return object
-} 
+}
+
+
+const systemPrompt = () => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
+
+<system_constraints>
+You will be given a template repository that's setup with React and Vite-PWA.
+
+Technical Limitations:
+- No backend access - frontend/React code and config modifications only
+- No databases or backend web servers
+- Local storage and PWA capabilities only
+- Must be mobile-first and fully responsive
+
+Project Structure Requirements:
+1. Feature Breakdown:
+   - List all core features with priority levels
+   - Identify MVP (Minimum Viable Product) features
+   - Plan future enhancement possibilities
+   - Consider offline functionality requirements
+
+2. Design Inspiration:
+   - Reference similar successful applications
+   - Note specific UI/UX patterns to incorporate
+   - Identify key interaction patterns
+   - Consider accessibility requirements
+
+3. Visual Style Guide:
+   - Define color palette (primary, secondary, accent colors)
+   - Specify typography (fonts, sizes, weights)
+   - Detail component styles (shadows, borders, spacing)
+   - Document animation preferences
+   - List icon and asset requirements
+
+4. Mobile Considerations:
+   - Touch targets and spacing
+   - Responsive breakpoints
+   - Mobile-specific interactions
+   - Performance optimization
+</system_constraints>
+
+<chain_of_thought_instructions>
+Before providing a solution, outline your implementation approach in these key areas:
+
+1. Features & Components:
+   - List core features to implement
+   - Identify key React components needed
+   - Note any PWA-specific features
+
+2. Design Strategy:
+   - Color scheme and theme
+   - Layout structure
+   - Mobile-first considerations
+   - Key UI/UX elements
+
+3. Technical Considerations:
+   - Required dependencies
+   - State management approach
+   - Local storage strategy
+   - Performance optimizations
+
+Format your planning as:
+"I'll create this [type] app with:
+Features: [2-3 key features]
+Design: [key design elements]
+Tech Stack: [main technical choices]
+Let's implement!"
+
+Example:
+User: "Create a weather PWA"
+Assistant: "I'll create this weather app with:
+Features: Current conditions display, 5-day forecast, location-based updates
+Design: Clean card layout, weather icons, blue/white theme
+Tech Stack: React + Vite, LocalStorage for caching, Geolocation API
+Let's implement!"
+</chain_of_thought_instructions>`
+
+const implementationSystemPrompt = () => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
+
+<system_constraints>
+You will be given a template repository that's setup with React and Vite-PWA.
+
+Technical Limitations:
+- No backend access - frontend/React code and config modifications only
+- No databases or backend web servers
+- Local storage and PWA capabilities only
+CRITICAL: Must be fully responsive and mobile-first in UI. So think thoroughly about the UI/UX of the app being completely functional on mobile devices.
+
+Project Structure Requirements:
+1. Feature Breakdown:
+   - List all core features with priority levels
+   - Identify MVP (Minimum Viable Product) features
+   - Plan future enhancement possibilities
+   - Consider offline functionality requirements
+
+2. Design Inspiration:
+   - Reference similar successful applications
+   - Note specific UI/UX patterns to incorporate
+   - Identify key interaction patterns
+   - Consider accessibility requirements
+
+3. Visual Style Guide:
+   - Define color palette (primary, secondary, accent colors)
+   - Specify typography (fonts, sizes, weights)
+   - Detail component styles (shadows, borders, spacing)
+   - Document animation preferences
+   - List icon and asset requirements
+
+4. Mobile Considerations:
+   - Touch targets and spacing
+   - Responsive breakpoints
+   - Mobile-specific interactions
+   - Performance optimization
+</system_constraints>
+
+<diff_info>
+When updating existing code, follow this diff structure:
+1. File Path: Relative path to the file being modified
+2. Original Code: Show the specific code block being changed
+3. Updated Code: Show the new code block that replaces it
+4. Changes: Brief description of what changed
+
+Example diff format:
+\`\`\`diff
+File: src/components/Weather.jsx
+
+  - Original:
+const Weather = () => {
+  return <div>Basic weather</div>
+}
+
+  + Updated:
+const Weather = () => {
+  return (
+    <div className="weather-card">
+      <h2>Current Weather</h2>
+      <p>Temperature: 72°F</p>
+    </div>
+  )
+}
+
+Changes: Added structured weather display with temperature
+\`\`\`
+</diff_info>`

@@ -1,0 +1,1289 @@
+Directory structure:
+└── .//
+    ├── bun.lockb
+    ├── .vercel/
+    ├── README.md
+    ├── .env.local
+    ├── tsconfig.json
+    ├── next.config.js
+    ├── biome.json
+    ├── app/
+    │   ├── api/
+    │   │   ├── types.ts
+    │   │   ├── services/
+    │   │   │   ├── ai.ts
+    │   │   │   ├── deployment.ts
+    │   │   │   ├── repository.ts
+    │   │   │   ├── vercel.ts
+    │   │   │   ├── github.ts
+    │   │   │   └── cloudflare.ts
+    │   │   ├── [...route]/
+    │   │   │   └── route.ts
+    │   │   ├── constants.ts
+    │   │   └── middleware.ts
+    │   ├── page.tsx
+    │   └── layout.tsx
+    ├── next-env.d.ts
+    └── package.json
+
+================================================
+File: /README.md
+================================================
+```
+npm install
+npm run dev
+```
+
+
+================================================
+File: /.env.local
+================================================
+ANTHROPIC_API_KEY="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"
+GITHUB_PERSONAL_ACCESS_TOKEN="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"
+OPENAI_API_KEY="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"
+CLOUDFLARE_API_KEY="87e683ab2b309b3faae810ad65f62a3b47c8b"
+CLOUDFLARE_EMAIL="rkwarya@gmail.com"
+CLOUDFLARE_ACCOUNT_ID="6e2d5c0029820952e91d50c7b3ad2a8f"
+VERCEL_BEARER_TOKEN="8N1yFSdO02VdzA3qgGQyzl3S"
+CLOUDFLARE_ZONE_ID="94256665f3c44b19ceba035ce43382f6"
+
+================================================
+File: /tsconfig.json
+================================================
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
+
+================================================
+File: /next.config.js
+================================================
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+}
+
+module.exports = nextConfig
+
+
+================================================
+File: /biome.json
+================================================
+{
+	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+	"vcs": {
+		"enabled": false,
+		"clientKind": "git",
+		"useIgnoreFile": false
+	},
+	"files": {
+		"ignoreUnknown": false,
+		"ignore": []
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab"
+	},
+	"organizeImports": {
+		"enabled": true
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"suspicious": {
+				"noExplicitAny": "off"
+			}
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "single"
+		}
+	}
+}
+
+
+================================================
+File: /app/api/types.ts
+================================================
+import type { Octokit } from '@octokit/rest'
+
+export type TreeItem = {
+  type: 'file' | 'dir'
+  name: string
+  path: string
+  children?: TreeItem[]
+}
+
+export type GithubContent = {
+  tree: string
+  files: { path: string; content: string }[]
+}
+
+export type Variables = {
+  octokit: Octokit
+}
+
+================================================
+File: /app/api/services/ai.ts
+================================================
+import { z } from 'zod'
+import { generateObject, generateText } from 'ai'
+import { openai } from '@ai-sdk/openai'
+import type { Octokit } from '@octokit/rest'
+import { fetchFileContent } from './github'
+
+const fileChangeSchema = z.object({
+  changes: z.array(z.object({
+    path: z.string().describe('The path to the file relative to the repository root'),
+    changes: z.array(
+      z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('add'),
+          start: z.number().describe('The line number where to add the content (1-indexed)'),
+          content: z.string().describe('The content to add')
+        }),
+        z.object({
+          type: z.literal('remove'),
+          start: z.number().describe('The line number where to start removing (1-indexed)'),
+          end: z.number().describe('The line number where to end removing (inclusive)')
+        }),
+        z.object({
+          type: z.literal('replace'),
+          start: z.number().describe('The line number where to start replacing (1-indexed)'),
+          end: z.number().describe('The line number where to end replacing (inclusive)'),
+          content: z.string().describe('The new content to replace with')
+        })
+      ])
+    ),
+    description: z.string().describe('A brief description of what changed in this file')
+  }))
+})
+
+export async function generateImplementationPlan(repoContent: string, prompt: string): Promise<string> {
+  const { text: plan } = await generateText({
+    model: openai('gpt-4o'),
+    prompt: `Given this repository content:\n\n${repoContent}\n\nImplement the following feature: ${prompt}\n\nFirst, create a detailed plan for implementing this feature.`,
+    system: `You are an expert react and pwa developer named Wisp
+
+    Your job is to take a simple idea from a user and use that idea to create an app based on a template for a functional PWA app.
+
+    The main files you should be editing are:
+
+    pwa-assets.config.ts
+    vite.config.ts for the app manifest
+
+    And all the files under the src directory
+
+    Before implementing, think thoroughly about the steps you need to take.
+
+    Start by thinking of the styling - in the context of the prompt, how should the app look?
+
+    Then think of the actual implementation. You can only make frontend/react changes since this is a vite app.
+
+    Make sure everything is typesafe.
+
+    You can NEVER install dependencies, you can only edit code`,
+  })
+
+  return plan
+}
+
+export async function generateCodeChanges(plan: string, repoContent: string) {
+  const { object } = await generateObject({
+    model: openai('gpt-4o'),
+    schema: fileChangeSchema,
+    prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\n
+Generate the necessary file changes to implement this feature. For each file that needs to be modified or created:
+
+1. For each change in a file, specify:
+   - The type of change (add/remove/replace)
+   - The line number where the change starts
+   - For replace/remove: the line number where it ends
+   - For add/replace: the new content to add
+
+2. For new files:
+   - Use a single 'add' change starting at line 1
+   - Include the complete file content
+
+3. For modifications:
+   - Break down your changes into specific regions
+   - Include enough context in the content
+   - Use line numbers from the original file
+
+Example of changes to an existing file:
+{
+  "path": "src/App.tsx",
+  "changes": [
+    {
+      "type": "replace",
+      "start": 5,
+      "end": 7,
+      "content": "function App() {\\n  const [count, setCount] = useState(0);\\n  return <div>{count}</div>;\\n}"
+    },
+    {
+      "type": "add",
+      "start": 3,
+      "content": "import { useState } from 'react';\\n"
+    }
+  ],
+  "description": "Added counter state to App component"
+}
+
+Example of a new file:
+{
+  "path": "src/styles.css",
+  "changes": [
+    {
+      "type": "add",
+      "start": 1,
+      "content": ".container {\\n  display: flex;\\n  padding: 1rem;\\n}"
+    }
+  ],
+  "description": "Created styles for container layout"
+}
+
+Only include files that need to be modified or created. Break down your changes into specific regions rather than rewriting entire files.`,
+  })
+
+  return object
+}
+
+export async function applyChangesToFiles(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  changes: z.infer<typeof fileChangeSchema>['changes']
+) {
+  const patchChanges = await Promise.all(changes.map(async file => {
+    let currentContent = ''
+    try {
+      const content = await fetchFileContent(octokit, owner, repo, file.path)
+      currentContent = content
+    } catch {
+      currentContent = ''
+    }
+
+    let newContent = currentContent
+    const lines = newContent.split('\n')
+
+    const sortedChanges = [...file.changes].sort((a, b) => b.start - a.start)
+
+    for (const change of sortedChanges) {
+      if (change.type === 'add') {
+        lines.splice(change.start - 1, 0, ...change.content.split('\n'))
+      } else if (change.type === 'remove') {
+        lines.splice(change.start - 1, change.end - change.start + 1)
+      } else if (change.type === 'replace') {
+        lines.splice(change.start - 1, change.end - change.start + 1, ...change.content.split('\n'))
+      }
+    }
+    newContent = lines.join('\n')
+
+    return {
+      path: file.path,
+      content: newContent,
+      description: file.description
+    }
+  }))
+
+  return patchChanges
+}
+
+export async function generateDeploymentErrorFix(repoContent: string, error: string) {
+  const { object } = await generateObject({
+    model: openai('gpt-4o'),
+    schema: fileChangeSchema,
+    prompt: `Fix the following deployment error in this repository:\n\nError: ${error}\n\nRepository content:\n${repoContent}\n\n
+Generate the necessary fixes to resolve this deployment error. Focus ONLY on changes that would fix the error.
+Be precise and minimal in your changes. Do not add features or make unrelated modifications.
+
+Example of fixing a build error:
+If the error is "Module not found: Can't resolve 'react'", you would fix the import statement or add the missing dependency.
+
+Only include files that need to be modified to fix the error. Break down your changes into specific regions rather than rewriting entire files.`,
+  })
+
+  return object
+} 
+
+================================================
+File: /app/api/services/deployment.ts
+================================================
+import type { Octokit } from '@octokit/rest'
+import { checkDeploymentStatus } from './vercel'
+import { getContent, createCommitWithFiles } from './github'
+import { generateDeploymentErrorFix } from './ai'
+
+const DEPLOYMENT_CHECK_INTERVAL = 5000
+const MAX_DEPLOYMENT_ATTEMPTS = 20
+const MAX_FIX_ATTEMPTS = 3
+
+interface DeploymentStatus {
+  success: boolean
+  error?: string
+  logs?: any
+}
+
+export async function waitForDeployment(
+  projectId: string,
+  octokit: Octokit,
+  repoName: string,
+): Promise<DeploymentStatus> {
+  let attempts = 0
+
+  while (attempts < MAX_DEPLOYMENT_ATTEMPTS) {
+    const { state, logs } = await checkDeploymentStatus(projectId)
+
+    switch (state) {
+      case 'READY':
+        return { success: true }
+      case 'ERROR':
+        return { success: false, error: 'Deployment failed', logs }
+      case 'CANCELED':
+      case 'DELETED':
+        return { success: false, error: `Deployment ${state.toLowerCase()}`, logs }
+      case 'NO_DEPLOYMENTS':
+        if (attempts === MAX_DEPLOYMENT_ATTEMPTS - 1) {
+          return { success: false, error: 'No deployments found after maximum attempts' }
+        }
+        break
+      default:
+        if (attempts === MAX_DEPLOYMENT_ATTEMPTS - 1) {
+          return { success: false, error: `Deployment timed out in state: ${state}`, logs }
+        }
+    }
+
+    await new Promise(resolve => setTimeout(resolve, DEPLOYMENT_CHECK_INTERVAL))
+    attempts++
+  }
+
+  return { success: false, error: 'Deployment timeout exceeded' }
+}
+
+export async function handleDeploymentError(
+  error: string,
+  logs: any,
+  octokit: Octokit,
+  repoName: string,
+  repoUrl: string
+): Promise<boolean> {
+  const { tree, files } = await getContent(octokit, repoUrl)
+  const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map(
+    (f: { path: string; content: string }) => `\n--- ${f.path} ---\n${f.content}`
+  ).join('\n')}`
+
+  const changes = await generateDeploymentErrorFix(repoContent, error)
+  if (changes.changes.length === 0) return false
+
+  const patchFiles = changes.changes.map(change => ({
+    path: change.path,
+    content: change.changes.map(c => c.type === 'remove' ? '' : c.content).join('\n')
+  }))
+
+  await createCommitWithFiles(
+    octokit,
+    'productstudioinc',
+    repoName,
+    'main',
+    patchFiles,
+    `fix: deployment error\n\n${error}\n\n${changes.changes.map(c => `- ${c.description}`).join('\n')}`
+  )
+
+  return true
+}
+
+export async function handleDeploymentWithRetries(
+  projectId: string,
+  octokit: Octokit,
+  repoName: string,
+  repoUrl: string
+): Promise<boolean> {
+  let fixAttempts = 0
+
+  while (fixAttempts < MAX_FIX_ATTEMPTS) {
+    const deploymentStatus = await waitForDeployment(projectId, octokit, repoName)
+    if (deploymentStatus.success) return true
+
+    if (!deploymentStatus.logs) return false
+
+    const fixed = await handleDeploymentError(
+      deploymentStatus.error || 'Unknown error',
+      deploymentStatus.logs,
+      octokit,
+      repoName,
+      repoUrl
+    )
+
+    if (!fixed) return false
+
+    await new Promise(resolve => setTimeout(resolve, DEPLOYMENT_CHECK_INTERVAL))
+    fixAttempts++
+  }
+
+  return false
+} 
+
+================================================
+File: /app/api/services/repository.ts
+================================================
+import type { Octokit } from '@octokit/rest'
+import { createFromTemplate, getContent, createCommitWithFiles } from './github'
+import { setupVercelProject, addDomainToProject } from './vercel'
+import { createDomainRecord } from './cloudflare'
+import { generateImplementationPlan, generateCodeChanges } from './ai'
+
+interface SetupResult {
+  projectId: string
+  deploymentUrl: string
+  dnsRecordId: string
+  customDomain: string
+}
+
+export async function setupRepository(
+  octokit: Octokit,
+  name: string,
+  prompt: string | undefined
+): Promise<SetupResult> {
+  const templateOwner = 'productstudioinc'
+  const templateRepo = 'vite_react_shadcn_pwa'
+
+  const newRepoUrl = await createFromTemplate(
+    octokit,
+    templateOwner,
+    templateRepo,
+    name
+  )
+
+  await new Promise(resolve => setTimeout(resolve, 2000))
+
+  const { projectId, deploymentUrl } = await setupVercelProject(name)
+  await addDomainToProject(projectId, name)
+
+  const dnsRecordId = await createDomainRecord(name)
+
+  if (prompt) {
+    await handleAIChanges(octokit, name, newRepoUrl, prompt)
+  }
+
+  return {
+    projectId,
+    deploymentUrl,
+    dnsRecordId,
+    customDomain: `${name}.usewisp.app`
+  }
+}
+
+async function handleAIChanges(
+  octokit: Octokit,
+  repoName: string,
+  repoUrl: string,
+  prompt: string
+): Promise<void> {
+  const { tree, files } = await getContent(octokit, repoUrl)
+  const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map(
+    (f: { path: string; content: string }) => `\n--- ${f.path} ---\n${f.content}`
+  ).join('\n')}`
+
+  const plan = await generateImplementationPlan(repoContent, prompt)
+  const changes = await generateCodeChanges(plan, repoContent)
+
+  const patchFiles = changes.changes.map(change => ({
+    path: change.path,
+    content: change.changes.map(c => c.type === 'remove' ? '' : c.content).join('\n')
+  }))
+
+  await createCommitWithFiles(
+    octokit,
+    'productstudioinc',
+    repoName,
+    'main',
+    patchFiles,
+    `feat: ${prompt}\n\n${changes.changes.map(c => `- ${c.description}`).join('\n')}`
+  )
+
+  await new Promise(resolve => setTimeout(resolve, 2000))
+} 
+
+================================================
+File: /app/api/services/vercel.ts
+================================================
+import { Vercel } from '@vercel/sdk'
+
+const vercel = new Vercel({
+  bearerToken: process.env.VERCEL_BEARER_TOKEN
+})
+
+export async function setupVercelProject(repoName: string) {
+  try {
+    const createResponse = await vercel.projects.createProject({
+      teamId: 'product-studio',
+      requestBody: {
+        name: repoName,
+        framework: 'vite',
+        gitRepository: {
+          repo: `productstudioinc/${repoName}`,
+          type: 'github'
+        }
+      }
+    })
+
+    return {
+      projectId: createResponse.id,
+      deploymentUrl: `https://${repoName}.vercel.app`
+    }
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+
+export async function addDomainToProject(projectId: string, domainPrefix: string) {
+  try {
+    const result = await vercel.projects.addProjectDomain({
+      idOrName: projectId,
+      teamId: 'product-studio',
+      requestBody: {
+        name: `${domainPrefix}.usewisp.app`,
+      }
+    })
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+export async function checkDomainStatus(projectId: string, domainPrefix: string) {
+  try {
+    const result = await vercel.projects.verifyProjectDomain({
+      idOrName: projectId,
+      teamId: 'product-studio',
+      domain: `${domainPrefix}.usewisp.app`,
+    })
+
+    return result.verified
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+export async function deleteProject(projectId: string) {
+  try {
+    await vercel.projects.deleteProject({
+      idOrName: projectId,
+      teamId: 'product-studio',
+    })
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+export async function checkDeploymentStatus(projectId: string) {
+  try {
+    const deployment = await vercel.deployments.getDeployments({
+      projectId: projectId,
+      teamId: 'product-studio',
+      limit: 1,
+    })
+
+
+    if (!deployment.deployments.length) {
+      return { state: 'NO_DEPLOYMENTS' }
+    }
+
+    const state = deployment.deployments[0].readyState
+
+    if (state === 'ERROR') {
+      const deploymentUrl = deployment.deployments[0].url
+      const response = await fetch(
+        `https://api.vercel.com/v3/deployments/${deploymentUrl}/events?builds=1&direction=backward&follow=0&limit=20`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.VERCEL_BEARER_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+
+      const deploymentLogs = (await response.json()) as Array<{
+        text: string;
+        type: string;
+        created: number;
+        date: number;
+        deploymentId: string;
+        id: string;
+        serial: string;
+        info: {
+          type: string;
+          name: string;
+          entrypoint: string;
+        };
+        level?: 'error';
+      }>
+
+      const formattedLogs = deploymentLogs
+        .reverse()
+        .filter(log => log.level === 'error')
+        .map(log => log.text)
+        .filter(text => text)
+
+      return { state, logs: formattedLogs }
+    }
+
+    return { state }
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+================================================
+File: /app/api/services/github.ts
+================================================
+import micromatch from 'micromatch'
+import type { TreeItem, GithubContent } from '../types'
+import { DEFAULT_IGNORE_PATTERNS } from '../constants'
+import type { Octokit } from '@octokit/rest'
+import { parsePatch, applyPatch } from 'diff'
+
+function shouldIgnorePath(path: string): boolean {
+  return micromatch.isMatch(path, DEFAULT_IGNORE_PATTERNS, { dot: true })
+}
+
+function generateTreeString(tree: TreeItem[], prefix = ''): string {
+  let result = ''
+  tree.forEach((item, index) => {
+    const isLast = index === tree.length - 1
+    const connector = isLast ? '└── ' : '├── '
+    result += `${prefix}${connector}${item.name}\n`
+
+    if (item.children) {
+      const newPrefix = prefix + (isLast ? '    ' : '│   ')
+      result += generateTreeString(item.children, newPrefix)
+    }
+  })
+  return result
+}
+
+async function fetchGithubTree(octokit: Octokit, owner: string, repo: string, path = ''): Promise<TreeItem[]> {
+  const response = await octokit.rest.repos.getContent({
+    owner,
+    repo,
+    path,
+  })
+
+  const items = Array.isArray(response.data) ? response.data : [response.data]
+  const result: TreeItem[] = []
+
+  for (const item of items) {
+    if (shouldIgnorePath(item.path)) {
+      continue
+    }
+
+    if (item.type === 'dir') {
+      const children = await fetchGithubTree(octokit, owner, repo, item.path)
+      if (children.length > 0) {
+        result.push({
+          type: 'dir',
+          name: item.name,
+          path: item.path,
+          children
+        })
+      }
+    } else if (item.type === 'file') {
+      result.push({
+        type: 'file',
+        name: item.name,
+        path: item.path
+      })
+    }
+  }
+
+  return result.sort((a, b) => {
+    if (a.type === b.type) return a.name.localeCompare(b.name)
+    return a.type === 'dir' ? -1 : 1
+  })
+}
+
+export async function fetchFileContent(octokit: Octokit, owner: string, repo: string, path: string): Promise<string> {
+  const response = await octokit.rest.repos.getContent({
+    owner,
+    repo,
+    path,
+  })
+
+  if ('content' in response.data) {
+    return Buffer.from(response.data.content, 'base64').toString()
+  }
+  throw new Error('Not a file')
+}
+
+export async function getContent(octokit: Octokit, url: string): Promise<GithubContent> {
+  const urlParts = url.replace('https://github.com/', '').split('/')
+  const owner = urlParts[0]
+  const repo = urlParts[1]
+  const path = urlParts.slice(2).join('/')
+
+  try {
+    const tree = await fetchGithubTree(octokit, owner, repo, path)
+    const treeString = generateTreeString([{
+      type: 'dir',
+      name: `${repo}/`,
+      path: '',
+      children: tree
+    }])
+
+    const files: { path: string, content: string }[] = []
+
+    async function collectFiles(items: TreeItem[]) {
+      for (const item of items) {
+        if (item.type === 'file' && !shouldIgnorePath(item.path)) {
+          const content = await fetchFileContent(octokit, owner, repo, item.path)
+          files.push({
+            path: item.path,
+            content
+          })
+        }
+        if (item.children) {
+          await collectFiles(item.children)
+        }
+      }
+    }
+
+    await collectFiles(tree)
+
+    return {
+      tree: treeString,
+      files
+    }
+  } catch (error: any) {
+    throw new Error(`Failed to fetch GitHub content: ${error.message}`)
+  }
+}
+
+export async function createFromTemplate(octokit: Octokit, templateOwner: string, templateRepo: string, newRepoName: string): Promise<string> {
+  await octokit.rest.repos.createUsingTemplate({
+    template_owner: templateOwner,
+    template_repo: templateRepo,
+    owner: 'productstudioinc',
+    name: newRepoName,
+    private: false,
+    include_all_branches: false
+  })
+
+  return `https://github.com/productstudioinc/${newRepoName}`
+}
+
+export async function createCommit(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  branch: string,
+  filePath: string,
+  content: string,
+  message: string
+): Promise<void> {
+  try {
+    const { data: branchData } = await octokit.rest.repos.getBranch({
+      owner,
+      repo,
+      branch,
+    })
+
+    await octokit.rest.repos.createOrUpdateFileContents({
+      owner,
+      repo,
+      path: filePath,
+      message,
+      content: Buffer.from(content).toString('base64'),
+      branch,
+      sha: branchData.commit.sha
+    })
+  } catch (error: any) {
+    throw new Error(`Failed to create commit: ${error.message}`)
+  }
+}
+
+export async function createCommitWithFiles(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  branch: string,
+  files: { path: string; content: string }[],
+  message: string
+): Promise<void> {
+  try {
+    const { data: ref } = await octokit.rest.git.getRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+    })
+
+    const blobs = await Promise.all(
+      files.map(async file => {
+        const normalizedPath = file.path.replace(/^\/+/, '')
+
+        const { data: blob } = await octokit.rest.git.createBlob({
+          owner,
+          repo,
+          content: file.content,
+          encoding: 'utf-8',
+        })
+
+        return {
+          path: normalizedPath,
+          mode: '100644' as const,
+          type: 'blob' as const,
+          sha: blob.sha,
+        }
+      })
+    )
+
+    const { data: newTree } = await octokit.rest.git.createTree({
+      owner,
+      repo,
+      base_tree: ref.object.sha,
+      tree: blobs,
+    })
+
+    const { data: newCommit } = await octokit.rest.git.createCommit({
+      owner,
+      repo,
+      message,
+      tree: newTree.sha,
+      parents: [ref.object.sha],
+    })
+
+    await octokit.rest.git.updateRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+      sha: newCommit.sha,
+    })
+  } catch (error: any) {
+    throw new Error(`Failed to create commit: ${error.message}`)
+  }
+}
+
+export async function createCommitWithPatches(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  branch: string,
+  changes: { path: string; patch: string }[],
+  message: string
+): Promise<void> {
+  try {
+    const { data: ref } = await octokit.rest.git.getRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+    })
+
+    const tree = []
+    for (const change of changes) {
+      let newContent: string
+      try {
+        const { data: currentFile } = await octokit.rest.repos.getContent({
+          owner,
+          repo,
+          path: change.path,
+          ref: ref.object.sha
+        })
+
+        if (!('content' in currentFile)) {
+          throw new Error(`${change.path} is not a file`)
+        }
+
+        const currentContent = Buffer.from(currentFile.content, 'base64').toString()
+        const parsedPatch = parsePatch(change.patch)
+        const patchResult = applyPatch(currentContent, parsedPatch[0])
+        if (patchResult === false) {
+          throw new Error(`Failed to apply patch to ${change.path}`)
+        }
+        newContent = patchResult
+      } catch (e) {
+        newContent = change.patch
+          .split('\n')
+          .filter(line => line.startsWith('+'))
+          .map(line => line.slice(1))
+          .join('\n')
+      }
+
+      const { data: blob } = await octokit.rest.git.createBlob({
+        owner,
+        repo,
+        content: newContent,
+        encoding: 'utf-8',
+      })
+
+      const normalizedPath = change.path.replace(/^\/+/, '')
+      tree.push({
+        path: normalizedPath,
+        mode: '100644' as const,
+        type: 'blob' as const,
+        sha: blob.sha,
+      })
+    }
+
+    const { data: newTree } = await octokit.rest.git.createTree({
+      owner,
+      repo,
+      base_tree: ref.object.sha,
+      tree,
+    })
+
+    const { data: newCommit } = await octokit.rest.git.createCommit({
+      owner,
+      repo,
+      message,
+      tree: newTree.sha,
+      parents: [ref.object.sha],
+    })
+
+    await octokit.rest.git.updateRef({
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+      sha: newCommit.sha,
+    })
+  } catch (error: any) {
+    throw new Error(`Failed to create commit with patches: ${error.message}`)
+  }
+}
+
+export async function deleteRepository(
+  octokit: Octokit,
+  owner: string,
+  repo: string
+): Promise<void> {
+  try {
+    await octokit.rest.repos.delete({
+      owner,
+      repo,
+    })
+  } catch (error: any) {
+    throw new Error(`Failed to delete repository: ${error.message}`)
+  }
+} 
+
+================================================
+File: /app/api/services/cloudflare.ts
+================================================
+import Cloudflare from 'cloudflare'
+
+const client = new Cloudflare()
+
+export async function createDomainRecord(domainPrefix: string) {
+  try {
+    const result = await client.dns.records.create({
+      type: 'CNAME',
+      name: domainPrefix,
+      zone_id: process.env.CLOUDFLARE_ZONE_ID as string,
+      proxied: false,
+      content: 'cname.vercel-dns.com.'
+    })
+    if (!result.id) throw new Error('Failed to create DNS record')
+    return result.id
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+export async function deleteDomainRecord(dnsRecordId: string) {
+  try {
+    await client.dns.records.delete(dnsRecordId, {
+      zone_id: process.env.CLOUDFLARE_ZONE_ID as string,
+    })
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+================================================
+File: /app/api/[...route]/route.ts
+================================================
+import { Hono } from 'hono'
+import { HTTPException } from 'hono/http-exception'
+import { handle } from 'hono/vercel'
+import { z } from 'zod'
+import type { Variables } from '../types'
+import { withGithubAuth } from '../middleware'
+import { deleteRepository } from '../services/github'
+import { deleteProject, checkDomainStatus } from '../services/vercel'
+import { deleteDomainRecord } from '../services/cloudflare'
+import { setupRepository } from '../services/repository'
+import { handleDeploymentWithRetries } from '../services/deployment'
+
+export const runtime = 'edge'
+
+const createRequestSchema = z.object({
+  name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens'),
+  prompt: z.string().optional()
+})
+
+const app = new Hono<{ Variables: Variables }>().basePath('/api')
+
+app.use('*', withGithubAuth)
+
+app.delete('/projects/:name', async (c) => {
+  const params = c.req.param('name')
+  const query = z.object({
+    dns_record_id: z.string().min(1),
+    project_id: z.string().min(1)
+  }).safeParse(c.req.query())
+
+  if (!query.success) {
+    throw new HTTPException(400, { message: 'Invalid query parameters' })
+  }
+
+  try {
+    const octokit = c.get('octokit')
+    await deleteRepository(octokit, 'productstudioinc', params)
+    await deleteDomainRecord(query.data.dns_record_id)
+    await deleteProject(query.data.project_id)
+
+    return c.json({
+      status: 'success',
+      message: 'Repository, domain record, and project deleted successfully'
+    })
+  } catch (error: any) {
+    throw new HTTPException(500, { message: error.message })
+  }
+})
+
+app.post('/projects', async (c) => {
+  const body = await createRequestSchema.parseAsync(await c.req.json())
+
+  try {
+    const octokit = c.get('octokit')
+    const { projectId, dnsRecordId, customDomain } = await setupRepository(
+      octokit,
+      body.name,
+      body.prompt
+    )
+
+    let isVerified = false
+    let attempts = 0
+    while (!isVerified && attempts < 10) {
+      isVerified = await checkDomainStatus(projectId, body.name)
+      if (!isVerified) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        attempts++
+      }
+    }
+
+    const deploymentSuccess = await handleDeploymentWithRetries(
+      projectId,
+      octokit,
+      body.name,
+      `https://github.com/productstudioinc/${body.name}`
+    )
+
+    if (!deploymentSuccess) {
+      throw new Error('Deployment failed after multiple attempts')
+    }
+
+    return c.json({
+      custom_domain: customDomain,
+      dns_record_id: dnsRecordId,
+      project_id: projectId,
+      status: 'success',
+      message: body.prompt
+        ? 'Repository created and deployed with AI-generated changes'
+        : 'Repository created and deployed'
+    })
+  } catch (error: any) {
+    throw new HTTPException(500, { message: error.message })
+  }
+})
+
+export const POST = handle(app)
+export const DELETE = handle(app)
+
+================================================
+File: /app/api/constants.ts
+================================================
+export const DEFAULT_IGNORE_PATTERNS = [
+  // Python
+  '*.pyc', '*.pyo', '*.pyd', '__pycache__', '.pytest_cache', '.coverage',
+  '.tox', '.nox', '.mypy_cache', '.ruff_cache', '.hypothesis',
+  'poetry.lock', 'Pipfile.lock',
+  // JavaScript/Node
+  'node_modules', 'bower_components', 'package-lock.json', 'yarn.lock',
+  '.npm', '.yarn', '.pnpm-store', 'bun.lockb',
+  // Java
+  '*.class', '*.jar', '*.war', '*.ear', '*.nar', 'target/',
+  '.gradle/', 'build/', '.settings/', '.project', '.classpath',
+  'gradle-app.setting', '*.gradle',
+  // C/C++
+  '*.o', '*.obj', '*.so', '*.dll', '*.dylib', '*.exe', '*.lib',
+  '*.out', '*.a', '*.pdb',
+  // Swift/Xcode
+  '.build/', '*.xcodeproj/', '*.xcworkspace/', '*.pbxuser', '*.mode1v3',
+  '*.mode2v3', '*.perspectivev3', '*.xcuserstate', 'xcuserdata/', '.swiftpm/',
+  // Ruby
+  '*.gem', '.bundle/', 'vendor/bundle', 'Gemfile.lock', '.ruby-version',
+  '.ruby-gemset', '.rvmrc',
+  // Rust
+  'target/', 'Cargo.lock', '**/*.rs.bk',
+  // Go
+  'bin/', 'pkg/',
+  // .NET/C#
+  'bin/', 'obj/', '*.suo', '*.user', '*.userosscache', '*.sln.docstates',
+  'packages/', '*.nupkg',
+  // Version control
+  '.git', '.svn', '.hg', '.gitignore', '.gitattributes', '.gitmodules',
+  // Images and media
+  '*.svg', '*.png', '*.jpg', '*.jpeg', '*.gif', '*.ico', '*.pdf',
+  '*.mov', '*.mp4', '*.mp3', '*.wav',
+  // Virtual environments
+  'venv', '.venv', 'env', '.env', 'virtualenv',
+  // IDEs and editors
+  '.idea', '.vscode', '.vs', '*.swp', '*.swo', '*.swn', '.settings',
+  '.project', '.classpath', '*.sublime-*',
+  // Temporary and cache files
+  '*.log', '*.bak', '*.swp', '*.tmp', '*.temp', '.cache', '.sass-cache',
+  '.eslintcache', '.DS_Store', 'Thumbs.db', 'desktop.ini',
+  // Build directories and artifacts
+  'build', 'dist', 'target', 'out', '*.egg-info', '*.egg', '*.whl',
+  '*.so', '*.dylib', '*.dll', '*.class',
+  // Documentation
+  'site-packages', '.docusaurus', '.next', '.nuxt',
+  // Other common patterns
+  '*.min.js', '*.min.css', '*.map', '.terraform', '*.tfstate*', 'vendor/'
+] as const 
+
+================================================
+File: /app/api/middleware.ts
+================================================
+import type { Context, Next } from 'hono'
+import { Octokit } from 'octokit'
+import type { Variables } from './types'
+
+export const withGithubAuth = async (c: Context<{ Variables: Variables }>, next: Next) => {
+  const token = process.env.GITHUB_PERSONAL_ACCESS_TOKEN
+  if (!token) {
+    return c.json({ message: 'GitHub token not configured' }, 500)
+  }
+  c.set('octokit', new Octokit({ auth: token }))
+  await next()
+} 
+
+================================================
+File: /app/page.tsx
+================================================
+export default function Home() {
+  return <p>wisp</p>;
+}
+
+
+================================================
+File: /app/layout.tsx
+================================================
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title: 'Hono | nextjs',
+  description: 'Generated by hono'
+}
+
+export default function RootLayout({
+  children
+}: Readonly<{
+  children: React.ReactNode
+}>) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  )
+}
+
+
+================================================
+File: /next-env.d.ts
+================================================
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+
+
+================================================
+File: /package.json
+================================================
+{
+  "name": "wisp",
+  "scripts": {
+    "dev": "next dev --turbo",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^1.0.13",
+    "@octokit/rest": "^21.0.2",
+    "@types/diff": "^7.0.0",
+    "@types/micromatch": "^4.0.9",
+    "@vercel/sdk": "^1.2.2",
+    "ai": "^4.0.26",
+    "cloudflare": "^3.5.0",
+    "diff": "^7.0.0",
+    "diff-match-patch": "^1.0.5",
+    "hono": "^4.6.16",
+    "micromatch": "^4.0.8",
+    "next": "^15.1.3",
+    "octokit": "^4.0.3",
+    "openai": "^4.77.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/node": "18.11.18",
+    "@types/react": "18.0.26",
+    "@types/react-dom": "18.0.10",
+    "typescript": "^5"
+  }
+}
+
+
