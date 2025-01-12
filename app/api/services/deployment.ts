@@ -61,12 +61,12 @@ export async function handleDeploymentError(
     (f: { path: string; content: string }) => `\n--- ${f.path} ---\n${f.content}`
   ).join('\n')}`
 
-  const changes = await generateDeploymentErrorFix(repoContent, error)
-  if (changes.changes.length === 0) return false
+  const result = await generateDeploymentErrorFix(repoContent, logs)
+  if (!result?.changes?.length) return false
 
-  const patchFiles = changes.changes.map(change => ({
+  const patchFiles = result.changes.map(change => ({
     path: change.path,
-    content: change.changes.map(c => c.type === 'remove' ? '' : c.content).join('\n')
+    content: change.content
   }))
 
   await createCommitWithFiles(
@@ -75,7 +75,7 @@ export async function handleDeploymentError(
     repoName,
     'main',
     patchFiles,
-    `fix: deployment error\n\n${error}\n\n${changes.changes.map(c => `- ${c.description}`).join('\n')}`
+    `fix: deployment error\n\n${error}\n\n${result.changes.map(c => `- ${c.description}`).join('\n')}`
   )
 
   return true

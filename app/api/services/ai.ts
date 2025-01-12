@@ -2,32 +2,13 @@ import { z } from 'zod'
 import { generateObject, generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import type { Octokit } from '@octokit/rest'
-import { fetchFileContent } from './github'
 import { observe } from '@lmnr-ai/lmnr'
 import { anthropic } from '@ai-sdk/anthropic'
+
 const fileChangeSchema = z.object({
   changes: z.array(z.object({
     path: z.string().describe('The path to the file relative to the repository root'),
-    changes: z.array(
-      z.discriminatedUnion('type', [
-        z.object({
-          type: z.literal('add'),
-          start: z.number().describe('The line number where to add the content (1-indexed)'),
-          content: z.string().describe('The content to add')
-        }),
-        z.object({
-          type: z.literal('remove'),
-          start: z.number().describe('The line number where to start removing (1-indexed)'),
-          end: z.number().describe('The line number where to end removing (inclusive)')
-        }),
-        z.object({
-          type: z.literal('replace'),
-          start: z.number().describe('The line number where to start replacing (1-indexed)'),
-          end: z.number().describe('The line number where to end replacing (inclusive)'),
-          content: z.string().describe('The new content to replace with')
-        })
-      ])
-    ),
+    content: z.string().describe('The complete content that should be in this file'),
     description: z.string().describe('A brief description of what changed in this file')
   }))
 })
@@ -90,6 +71,8 @@ export async function generateCodeChanges(prompt: string, repoContent: string) {
         })
       )
 
+      console.dir(implementation.changes, { depth: null })
+
       return {
         plan,
         changes: implementation.changes
@@ -107,33 +90,9 @@ export async function applyChangesToFiles(
   changes: z.infer<typeof fileChangeSchema>['changes']
 ) {
   const patchChanges = await Promise.all(changes.map(async file => {
-    let currentContent = ''
-    try {
-      const content = await fetchFileContent(octokit, owner, repo, file.path)
-      currentContent = content
-    } catch {
-      currentContent = ''
-    }
-
-    let newContent = currentContent
-    const lines = newContent.split('\n')
-
-    const sortedChanges = [...file.changes].sort((a, b) => b.start - a.start)
-
-    for (const change of sortedChanges) {
-      if (change.type === 'add') {
-        lines.splice(change.start - 1, 0, ...change.content.split('\n'))
-      } else if (change.type === 'remove') {
-        lines.splice(change.start - 1, change.end - change.start + 1)
-      } else if (change.type === 'replace') {
-        lines.splice(change.start - 1, change.end - change.start + 1, ...change.content.split('\n'))
-      }
-    }
-    newContent = lines.join('\n')
-
     return {
       path: file.path,
-      content: newContent,
+      content: file.content,
       description: file.description
     }
   }))
@@ -142,22 +101,28 @@ export async function applyChangesToFiles(
 }
 
 export async function generateDeploymentErrorFix(repoContent: string, error: string) {
-  const { object } = await generateObject({
-    model: openai('gpt-4o'),
-    schema: fileChangeSchema,
-    prompt: `Fix the following deployment error in this repository:\n\nError: ${error}\n\nRepository content:\n${repoContent}\n\n
+  return await observe(
+    { name: 'generate-deployment-error-fix' },
+    async (repoContent: string, error: string) => {
+      console.log('Generating deployment error fix')
+      const { object: implementation } = await generateObject({
+        model: anthropic('claude-3-5-sonnet-latest'),
+        schema: fileChangeSchema,
+        system: systemPrompt(),
+        prompt: `Fix the following deployment error in this repository:\n\nError: ${error}\n\nRepository content:\n${repoContent}\n\n
 Generate the necessary fixes to resolve this deployment error. Focus ONLY on changes that would fix the error.
 Be precise and minimal in your changes. Do not add features or make unrelated modifications.
 
-Example of fixing a build error:
-If the error is "Module not found: Can't resolve 'react'", you would fix the import statement or add the missing dependency.
+Only include files that need to be modified to fix the error.`,
+      })
 
-Only include files that need to be modified to fix the error. Break down your changes into specific regions rather than rewriting entire files.`,
-  })
-
-  return object
+      console.dir('Implementation', implementation)
+      return implementation
+    },
+    repoContent,
+    error
+  )
 }
-
 
 const systemPrompt = () => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
 
@@ -242,8 +207,10 @@ Technical Limitations:
 - No backend access - frontend/React code and config modifications only
 - No databases or backend web servers
 - Local storage and PWA capabilities only
+- MAKE SURE your changes are typesafe.
 CRITICAL: Must be fully responsive and mobile-first in UI. So think thoroughly about the UI/UX of the app being completely functional on mobile devices.
 IMPORTANT: Keep all new comopnents in the App.tsx file.
+IMPORTANT: You must not delete anything in the original src/index.css file, you can only add onto it or modify the color values in the @layer base section.
 
 Project Structure Requirements:
 1. Feature Breakdown:
@@ -270,34 +237,4 @@ Project Structure Requirements:
    - Responsive breakpoints
    - Mobile-specific interactions
    - Performance optimization
-</system_constraints>
-
-<diff_info>
-When updating existing code, follow this diff structure:
-1. File Path: Relative path to the file being modified
-2. Original Code: Show the specific code block being changed
-3. Updated Code: Show the new code block that replaces it
-4. Changes: Brief description of what changed
-
-Example diff format:
-\`\`\`diff
-File: src/components/Weather.jsx
-
-  - Original:
-const Weather = () => {
-  return <div>Basic weather</div>
-}
-
-  + Updated:
-const Weather = () => {
-  return (
-    <div className="weather-card">
-      <h2>Current Weather</h2>
-      <p>Temperature: 72°F</p>
-    </div>
-  )
-}
-
-Changes: Added structured weather display with temperature
-\`\`\`
-</diff_info>`
+</system_constraints>`

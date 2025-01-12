@@ -60,7 +60,7 @@ async function handleAIChanges(
 
   const patchFiles = changes.changes.map(change => ({
     path: change.path,
-    content: change.changes.map(c => c.type === 'remove' ? '' : c.content).join('\n')
+    content: change.content
   }))
 
   await createCommitWithFiles(

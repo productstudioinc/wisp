@@ -84,6 +84,7 @@ export async function checkDeploymentStatus(projectId: string) {
 
     if (state === 'ERROR') {
       const deploymentUrl = deployment.deployments[0].url
+      await new Promise(resolve => setTimeout(resolve, 3000))
       const response = await fetch(
         `https://api.vercel.com/v3/deployments/${deploymentUrl}/events?builds=1&direction=backward&follow=0&limit=20`,
         {
