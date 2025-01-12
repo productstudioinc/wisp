@@ -77,10 +77,11 @@ export async function generateCodeChanges(prompt: string, repoContent: string) {
         })
       )
 
-      const { text: implementation } = await observe(
+      const { object: implementation } = await observe(
         { name: 'generate-implementation-text' },
-        async () => await generateText({
+        async () => await generateObject({
           model: anthropic('claude-3-5-sonnet-latest'),
+          schema: fileChangeSchema,
           prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app.`,
           system: implementationSystemPrompt(),
           experimental_telemetry: {
@@ -89,22 +90,9 @@ export async function generateCodeChanges(prompt: string, repoContent: string) {
         })
       )
 
-      const { object } = await observe(
-        { name: 'generate-code-object' },
-        async () => await generateObject({
-          model: openai('gpt-4o-mini'),
-          schema: fileChangeSchema,
-          prompt: implementation,
-          system: 'You are an expert react and pwa developer named Wisp. You will be given a detailed implementation plan and you will need to generate the specific code changes to implement it based on the diff information provided.',
-          experimental_telemetry: {
-            isEnabled: true
-          }
-        })
-      )
-
       return {
         plan,
-        changes: object.changes
+        changes: implementation.changes
       }
     },
     prompt,
@@ -255,6 +243,7 @@ Technical Limitations:
 - No databases or backend web servers
 - Local storage and PWA capabilities only
 CRITICAL: Must be fully responsive and mobile-first in UI. So think thoroughly about the UI/UX of the app being completely functional on mobile devices.
+IMPORTANT: Keep all new comopnents in the App.tsx file.
 
 Project Structure Requirements:
 1. Feature Breakdown:
