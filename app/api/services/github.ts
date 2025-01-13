@@ -120,16 +120,38 @@ export async function getContent(octokit: Octokit, url: string): Promise<GithubC
 }
 
 export async function createFromTemplate(octokit: Octokit, templateOwner: string, templateRepo: string, newRepoName: string): Promise<string> {
-  await octokit.rest.repos.createUsingTemplate({
-    template_owner: templateOwner,
-    template_repo: templateRepo,
-    owner: 'productstudioinc',
-    name: newRepoName,
-    private: false,
-    include_all_branches: false
-  })
+  try {
+    try {
+      await octokit.rest.repos.get({
+        owner: 'productstudioinc',
+        repo: newRepoName,
+      });
 
-  return `https://github.com/productstudioinc/${newRepoName}`
+      await octokit.rest.repos.delete({
+        owner: 'productstudioinc',
+        repo: newRepoName,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (error: any) {
+      if (error.status !== 404) {
+        throw error;
+      }
+    }
+
+    await octokit.rest.repos.createUsingTemplate({
+      template_owner: templateOwner,
+      template_repo: templateRepo,
+      owner: 'productstudioinc',
+      name: newRepoName,
+      private: false,
+      include_all_branches: false
+    })
+
+    return `https://github.com/productstudioinc/${newRepoName}`
+  } catch (error: any) {
+    throw new Error(`Failed to create repository from template: ${error.message}`)
+  }
 }
 
 export async function createCommit(

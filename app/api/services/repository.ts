@@ -2,7 +2,7 @@ import type { Octokit } from '@octokit/rest'
 import { createFromTemplate, getContent, createCommitWithFiles } from './github'
 import { setupVercelProject, addDomainToProject } from './vercel'
 import { createDomainRecord } from './cloudflare'
-import { generateImplementationPlan, generateCodeChanges } from './ai'
+import { generateCodeChanges } from './ai'
 
 interface SetupResult {
   projectId: string

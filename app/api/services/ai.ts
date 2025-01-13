@@ -13,35 +13,6 @@ const fileChangeSchema = z.object({
   }))
 })
 
-export async function generateImplementationPlan(repoContent: string, prompt: string): Promise<string> {
-  const { text: plan } = await generateText({
-    model: openai('gpt-4o'),
-    prompt: `Given this repository content:\n\n${repoContent}\n\nImplement the following feature: ${prompt}\n\nFirst, create a detailed plan for implementing this feature.`,
-    system: `You are an expert react and pwa developer named Wisp
-
-    Your job is to take a simple idea from a user and use that idea to create an app based on a template for a functional PWA app.
-
-    The main files you should be editing are:
-
-    pwa-assets.config.ts
-    vite.config.ts for the app manifest
-
-    And all the files under the src directory
-
-    Before implementing, think thoroughly about the steps you need to take.
-
-    Start by thinking of the styling - in the context of the prompt, how should the app look?
-
-    Then think of the actual implementation. You can only make frontend/react changes since this is a vite app.
-
-    Make sure everything is typesafe.
-
-    You can NEVER install dependencies, you can only edit code`,
-  })
-
-  return plan
-}
-
 export async function generateCodeChanges(prompt: string, repoContent: string) {
   return await observe(
     { name: 'generate-code-changes' },
@@ -50,8 +21,91 @@ export async function generateCodeChanges(prompt: string, repoContent: string) {
         { name: 'generate-implementation-plan' },
         async () => await generateText({
           model: anthropic('claude-3-5-sonnet-latest'),
-          prompt: `Given this repository content:\n\n${repoContent}\n\nCreate a detailed implementation plan for the following app: ${prompt}`,
-          system: systemPrompt(),
+          prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
+
+First, review the content of the template repository:
+
+<repository_content>
+${repoContent}
+</repository_content>
+
+Now, consider the user's app idea:
+
+<user_app_idea>
+${prompt}
+</user_app_idea>
+
+Before providing your implementation plan, wrap your analysis inside <analysis> tags, considering the following key areas:
+
+1. Features & Components:
+   - List core features to implement (minimum 5)
+   - Prioritize features based on user needs and PWA best practices
+   - Identify key React components needed (minimum 3)
+   - Note PWA-specific features (minimum 2)
+
+2. Design Strategy:
+   - Propose a color scheme and theme
+   - Outline the layout structure
+   - Detail mobile-first considerations
+   - Describe key UI/UX elements
+   - Brainstorm creative UI/UX ideas specific to the app concept
+
+3. Technical Considerations:
+   - List required dependencies
+   - Explain your state management approach
+   - Detail your local storage strategy
+   - Describe performance optimizations
+   - Outline your approach to ensuring type safety
+
+4. Mobile-First PWA Development:
+   - Describe touch-friendly interface elements
+   - Explain responsive design strategies
+   - Detail offline functionality
+   - Outline PWA-specific optimizations
+
+5. Challenges and Solutions:
+   - Identify potential technical or design challenges
+   - Propose solutions or mitigation strategies for each challenge
+
+After your thorough analysis, provide a detailed implementation plan using the following format:
+
+"I'll create this [type] PWA with:
+
+Features:
+1. [Feature 1]
+2. [Feature 2]
+3. [Feature 3]
+4. [Feature 4]
+5. [Feature 5]
+
+Design:
+- Color Scheme: [color palette]
+- Layout: [layout description]
+- Mobile-First Elements: [key mobile design considerations]
+- UI/UX Highlights: [notable UI/UX features]
+
+Tech Stack:
+- Framework: React + Vite
+- State Management: [chosen approach]
+- Data Persistence: [storage strategy]
+- Performance Optimizations: [key optimizations]
+- Type Safety Measures: [approach to ensure type safety]
+
+Mobile PWA Enhancements:
+- Touch Interface: [touch-friendly features]
+- Responsive Design: [responsive strategies]
+- Offline Capabilities: [offline functionality]
+- PWA Optimizations: [PWA-specific enhancements]
+
+Implementation Steps:
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+...
+
+Let's implement!"
+
+Ensure that your plan prioritizes mobile-first development, emphasizes type safety, and provides a comprehensive approach to building a high-quality PWA.`,
           experimental_telemetry: {
             isEnabled: true
           }

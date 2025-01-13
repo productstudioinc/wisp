@@ -48,6 +48,7 @@ async function retryWithBackoff<T>(
     }
   }
 
+  // biome-ignore lint/style/noNonNullAssertion: <explanation>
   throw lastError!;
 }
 
@@ -61,25 +62,18 @@ function handleError(error: unknown) {
 
     throw new HTTPException(status, {
       message: error.message,
-      details: {
-        code: error.code,
-        errorChain: error.errorChain,
-        operation: error.metadata.operation,
-        details: error.metadata.details,
-      }
+
     });
   }
 
   if (error instanceof Error) {
     throw new HTTPException(500, {
       message: error.message,
-      details: { error: error.toString() }
     });
   }
 
   throw new HTTPException(500, {
     message: 'An unknown error occurred',
-    details: { error: String(error) }
   });
 }
 
@@ -95,7 +89,6 @@ app.delete('/projects/:name', async (c) => {
   if (!query.success) {
     throw new HTTPException(400, {
       message: 'Invalid query parameters',
-      details: query.error.format()
     });
   }
 

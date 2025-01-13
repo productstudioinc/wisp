@@ -6,6 +6,27 @@ const vercel = new Vercel({
 
 export async function setupVercelProject(repoName: string) {
   try {
+    try {
+      const projects = await vercel.projects.getProjects({
+        teamId: 'product-studio',
+      });
+
+      const existingProject = projects.projects.find(p => p.name === repoName);
+
+      if (existingProject) {
+        await vercel.projects.deleteProject({
+          idOrName: existingProject.id,
+          teamId: 'product-studio',
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    } catch (error) {
+      if (!(error instanceof Error && error.message.includes('not found'))) {
+        throw error;
+      }
+    }
+
     const createResponse = await vercel.projects.createProject({
       teamId: 'product-studio',
       requestBody: {
