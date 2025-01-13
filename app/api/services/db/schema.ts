@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, varchar, jsonb, pgEnum, index } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, varchar, jsonb, pgEnum, index, boolean } from "drizzle-orm/pg-core";
 
 export const projectStatus = pgEnum('project_status', ['creating', 'deploying', 'deployed', 'failed', 'deleted']);
 
@@ -22,7 +22,7 @@ export const projects = pgTable('projects', {
   createdAt: timestamp('created_at').defaultNow(),
   error: text('error'),
   deployedAt: timestamp('deployed_at'),
-  deletedAt: timestamp('deleted_at'),
+  private: boolean('private').notNull().default(false),
 }, (table) => {
   return {
     userIdIdx: index('user_id_idx').on(table.userId)

@@ -83,6 +83,7 @@ export async function createProject({
   projectId,
   dnsRecordId,
   customDomain,
+  private: isPrivate = false,
 }: {
   userId: string;
   name: string;
@@ -90,6 +91,7 @@ export async function createProject({
   projectId: string;
   dnsRecordId?: string;
   customDomain?: string;
+  private?: boolean;
 }) {
   try {
     const existingProject = await db.select()
@@ -114,6 +116,7 @@ export async function createProject({
       projectId,
       dnsRecordId,
       customDomain,
+      private: isPrivate,
       status: 'creating',
       statusMessage: 'Project creation started',
       lastUpdated: new Date(),
@@ -145,14 +148,12 @@ export async function updateProjectStatus({
   message,
   error,
   deployedAt,
-  deletedAt,
 }: {
   projectId: string;
   status: ProjectStatus;
   message: string;
   error?: string;
   deployedAt?: Date;
-  deletedAt?: Date;
 }) {
   try {
     const project = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
@@ -173,7 +174,6 @@ export async function updateProjectStatus({
         lastUpdated: new Date(),
         error: error || null,
         deployedAt: deployedAt || project[0].deployedAt,
-        deletedAt: deletedAt || project[0].deletedAt,
       })
       .where(eq(projects.id, projectId))
       .returning();
@@ -209,17 +209,7 @@ export async function deleteProject(projectId: string) {
       );
     }
 
-    const updatedProject = await db.update(projects)
-      .set({
-        status: 'deleted',
-        statusMessage: 'Project deleted',
-        lastUpdated: new Date(),
-        deletedAt: new Date(),
-      })
-      .where(eq(projects.projectId, projectId))
-      .returning();
-
-    return updatedProject[0];
+    await db.delete(projects).where(eq(projects.projectId, projectId));
   } catch (error) {
     if (error instanceof ProjectError) throw error;
 
@@ -229,7 +219,7 @@ export async function deleteProject(projectId: string) {
       'deleteProject',
       {
         projectId,
-        attemptedOperation: 'soft_delete',
+        attemptedOperation: 'delete',
       },
       error
     );
