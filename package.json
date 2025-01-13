@@ -10,6 +10,7 @@
     "@ai-sdk/openai": "^1.0.13",
     "@lmnr-ai/lmnr": "^0.4.33",
     "@octokit/rest": "^21.0.2",
+    "@supabase/supabase-js": "^2.47.12",
     "@types/diff": "^7.0.0",
     "@types/micromatch": "^4.0.9",
     "@vercel/sdk": "^1.2.2",
