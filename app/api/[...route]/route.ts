@@ -10,6 +10,9 @@ import { deleteDomainRecord } from '../services/cloudflare'
 import { setupRepository } from '../services/repository'
 import { handleDeploymentWithRetries } from '../services/deployment'
 import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, ProjectError } from '../services/db/queries'
+import { streamText } from 'ai'
+import { anthropic } from '@ai-sdk/anthropic'
+import { stream } from 'hono/streaming';
 
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 2000; // 2 seconds
@@ -231,6 +234,17 @@ app.post('/projects', async (c) => {
   } catch (error) {
     handleError(error);
   }
+})
+
+app.post('/chat', async c => {
+  const result = streamText({
+    model: anthropic('claude-3-5-sonnet-20240620'),
+    prompt: 'Invent a new holiday and describe its traditions.',
+  })
+
+  c.header('Content-Type', 'text/plain; charset=utf-8');
+
+  return stream(c, stream => stream.pipe(result.textStream));
 })
 
 export const POST = handle(app)
