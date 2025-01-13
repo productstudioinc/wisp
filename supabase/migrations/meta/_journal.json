@@ -22,6 +22,13 @@
       "when": 1736742516469,
       "tag": "0002_curly_the_call",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1736808228403,
+      "tag": "0003_abandoned_mongoose",
+      "breakpoints": true
     }
   ]
 }
