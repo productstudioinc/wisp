@@ -18,9 +18,11 @@ export const projects = pgTable('projects', {
   prompt: text('prompt'),
   status: projectStatus('status').notNull().default('creating'),
   statusMessage: text('status_message'),
-  metadata: jsonb('metadata'),
+  lastUpdated: timestamp('last_updated').defaultNow(),
   createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  error: text('error'),
+  deployedAt: timestamp('deployed_at'),
+  deletedAt: timestamp('deleted_at'),
 }, (table) => {
   return {
     userIdIdx: index('user_id_idx').on(table.userId)

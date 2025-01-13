@@ -9,7 +9,7 @@ import { deleteProject as deleteVercelProject, checkDomainStatus } from '../serv
 import { deleteDomainRecord } from '../services/cloudflare'
 import { setupRepository } from '../services/repository'
 import { handleDeploymentWithRetries } from '../services/deployment'
-import { createProject, deleteProject, getProject, updateProjectStatus, ProjectError } from '../services/db/queries'
+import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, ProjectError } from '../services/db/queries'
 
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 2000; // 2 seconds
@@ -135,9 +135,6 @@ app.post('/projects', async (c) => {
       name: body.name,
       prompt: body.prompt,
       projectId: '', // Will be updated after repository setup
-      metadata: {
-        creationStarted: new Date().toISOString(),
-      }
     })
 
     try {
@@ -150,17 +147,24 @@ app.post('/projects', async (c) => {
           await updateProjectStatus({
             projectId: project.id,
             status: 'creating',
-            message: `Repository setup attempt ${attempt} failed: ${error.message}`,
-            metadata: { error: error.toString() }
+            message: `Setting up repository (attempt ${attempt}/3)`,
+            error: error.toString()
           });
         }
       );
 
+      // Update project with the new values
+      await updateProjectDetails({
+        projectId: project.id,
+        vercelProjectId: projectId,
+        dnsRecordId,
+        customDomain
+      });
+
       await updateProjectStatus({
         projectId: project.id,
-        status: 'deploying',
-        message: 'Repository setup complete, starting deployment',
-        metadata: { projectId, dnsRecordId, customDomain }
+        status: 'creating',
+        message: 'Repository setup complete'
       });
 
       // Verify domain with exponential backoff
@@ -177,7 +181,7 @@ app.post('/projects', async (c) => {
             projectId: project.id,
             status: 'deploying',
             message: `Verifying domain status (attempt ${attempt}/10)`,
-            metadata: { error: error.toString() }
+            error: error.toString()
           });
         }
       );
@@ -201,12 +205,7 @@ app.post('/projects', async (c) => {
         projectId: project.id,
         status: 'deployed',
         message: 'Project successfully deployed',
-        metadata: {
-          customDomain,
-          dnsRecordId,
-          projectId,
-          deployedAt: new Date().toISOString(),
-        }
+        deployedAt: new Date()
       });
 
       console.log(`Project ${body.name} successfully created and deployed`);
@@ -225,7 +224,7 @@ app.post('/projects', async (c) => {
         projectId: project.id,
         status: 'failed',
         message: error instanceof Error ? error.message : 'Unknown error occurred',
-        metadata: { error: error instanceof Error ? error.toString() : String(error) }
+        error: error instanceof Error ? error.toString() : String(error)
       });
       throw error;
     }

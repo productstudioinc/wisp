@@ -83,7 +83,6 @@ export async function createProject({
   projectId,
   dnsRecordId,
   customDomain,
-  metadata = {},
 }: {
   userId: string;
   name: string;
@@ -91,7 +90,6 @@ export async function createProject({
   projectId: string;
   dnsRecordId?: string;
   customDomain?: string;
-  metadata?: Record<string, any>;
 }) {
   try {
     const existingProject = await db.select()
@@ -116,9 +114,10 @@ export async function createProject({
       projectId,
       dnsRecordId,
       customDomain,
-      metadata,
       status: 'creating',
       statusMessage: 'Project creation started',
+      lastUpdated: new Date(),
+      createdAt: new Date(),
     }).returning();
 
     return project[0];
@@ -144,12 +143,16 @@ export async function updateProjectStatus({
   projectId,
   status,
   message,
-  metadata = {},
+  error,
+  deployedAt,
+  deletedAt,
 }: {
   projectId: string;
   status: ProjectStatus;
   message: string;
-  metadata?: Record<string, any>;
+  error?: string;
+  deployedAt?: Date;
+  deletedAt?: Date;
 }) {
   try {
     const project = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
@@ -163,28 +166,14 @@ export async function updateProjectStatus({
       );
     }
 
-    const currentMetadata = project[0].metadata as Record<string, any> || {};
-
     const updatedProject = await db.update(projects)
       .set({
         status,
         statusMessage: message,
-        metadata: {
-          ...currentMetadata,
-          ...metadata,
-          lastUpdated: new Date().toISOString(),
-          previousStatus: project[0].status,
-          statusHistory: [
-            ...(currentMetadata.statusHistory || []),
-            {
-              from: project[0].status,
-              to: status,
-              message,
-              timestamp: new Date().toISOString(),
-            }
-          ],
-        },
-        updatedAt: new Date(),
+        lastUpdated: new Date(),
+        error: error || null,
+        deployedAt: deployedAt || project[0].deployedAt,
+        deletedAt: deletedAt || project[0].deletedAt,
       })
       .where(eq(projects.id, projectId))
       .returning();
@@ -201,7 +190,6 @@ export async function updateProjectStatus({
         projectId,
         attemptedStatus: status,
         attemptedMessage: message,
-        currentTimestamp: new Date().toISOString(),
       },
       error
     );
@@ -221,17 +209,12 @@ export async function deleteProject(projectId: string) {
       );
     }
 
-    const currentMetadata = project[0].metadata as Record<string, any> || {};
-
     const updatedProject = await db.update(projects)
       .set({
         status: 'deleted',
         statusMessage: 'Project deleted',
-        metadata: {
-          ...currentMetadata,
-          deletedAt: new Date().toISOString(),
-          deletionReason: 'user_requested',
-        },
+        lastUpdated: new Date(),
+        deletedAt: new Date(),
       })
       .where(eq(projects.projectId, projectId))
       .returning();
@@ -247,7 +230,6 @@ export async function deleteProject(projectId: string) {
       {
         projectId,
         attemptedOperation: 'soft_delete',
-        timestamp: new Date().toISOString(),
       },
       error
     );
@@ -345,6 +327,56 @@ export async function getUser(userId: string) {
       {
         userId,
         attemptedOperation: 'select_user',
+      },
+      error
+    );
+  }
+}
+
+export async function updateProjectDetails({
+  projectId,
+  vercelProjectId,
+  dnsRecordId,
+  customDomain,
+}: {
+  projectId: string;
+  vercelProjectId: string;
+  dnsRecordId?: string;
+  customDomain?: string;
+}) {
+  try {
+    const project = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+
+    if (!project.length) {
+      throw createError(
+        'PROJECT_NOT_FOUND',
+        `Project with ID "${projectId}" not found`,
+        'updateProjectDetails',
+        { projectId }
+      );
+    }
+
+    const updatedProject = await db.update(projects)
+      .set({
+        projectId: vercelProjectId,
+        dnsRecordId,
+        customDomain,
+        lastUpdated: new Date(),
+      })
+      .where(eq(projects.id, projectId))
+      .returning();
+
+    return updatedProject[0];
+  } catch (error) {
+    if (error instanceof ProjectError) throw error;
+
+    throw createError(
+      'UPDATE_FAILED',
+      'Failed to update project details',
+      'updateProjectDetails',
+      {
+        projectId,
+        attemptedOperation: 'update_details',
       },
       error
     );
