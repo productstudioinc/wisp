@@ -108,7 +108,7 @@ export async function generateDeploymentErrorFix(repoContent: string, error: str
       const { object: implementation } = await generateObject({
         model: anthropic('claude-3-5-sonnet-latest'),
         schema: fileChangeSchema,
-        system: systemPrompt(),
+        system: implementationSystemPrompt(),
         prompt: `Fix the following deployment error in this repository:\n\nError: ${error}\n\nRepository content:\n${repoContent}\n\n
 Generate the necessary fixes to resolve this deployment error. Focus ONLY on changes that would fix the error.
 Be precise and minimal in your changes. Do not add features or make unrelated modifications.
