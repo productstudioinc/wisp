@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { handle } from 'hono/vercel'
 import { z } from 'zod'
+import { zfd } from "zod-form-data"
 import type { Variables } from '../types'
 import { withGithubAuth } from '../middleware'
 import { deleteRepository } from '../services/github'
@@ -12,17 +13,18 @@ import { handleDeploymentWithRetries } from '../services/deployment'
 import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, ProjectError } from '../services/db/queries'
 import { generateObject, generateText, streamText } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
-import { stream } from 'hono/streaming';
-import { openai } from '@ai-sdk/openai'
 import { groq } from '@ai-sdk/groq'
 
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 2000; // 2 seconds
 
-const createRequestSchema = z.object({
+const createRequestSchema = zfd.formData({
   name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens'),
-  prompt: z.string().optional(),
-  userId: z.string().uuid()
+  description: z.string(),
+  userId: z.string().uuid(),
+  additionalInfo: zfd.text(z.string().optional()),
+  icon: zfd.file().optional(),
+  images: zfd.repeatableOfType(zfd.file()).optional(),
 })
 
 const refineRequestSchema = z.object({
@@ -133,115 +135,122 @@ app.delete('/projects/:name', async (c) => {
 })
 
 app.post('/projects', async (c) => {
-  const body = await createRequestSchema.parseAsync(await c.req.json())
-  console.log(`Creating new project: ${body.name}`)
+  const formData = await c.req.formData()
+  const result = await createRequestSchema.parseAsync(formData)
+  console.log(`Creating new project: ${result.name}`)
 
   try {
     const octokit = c.get('octokit')
 
     // Create project in database first
     const project = await createProject({
-      userId: body.userId,
-      name: body.name,
-      prompt: body.prompt,
+      userId: result.userId,
+      name: result.name,
+      prompt: result.description,
       projectId: '', // Will be updated after repository setup
     })
 
-    try {
-      // Setup repository with retries
-      const { projectId, dnsRecordId, customDomain } = await retryWithBackoff(
-        () => setupRepository(octokit, body.name, body.prompt),
-        3,
-        2000,
-        async (attempt, error) => {
-          await updateProjectStatus({
-            projectId: project.id,
-            status: 'creating',
-            message: `Setting up repository (attempt ${attempt}/3)`,
-            error: error.toString()
-          });
-        }
-      );
+    processProjectSetup(project, octokit, result.name, result.description).catch(error => {
+      console.error('Background task failed:', error);
+    });
 
-      // Update project with the new values
-      await updateProjectDetails({
-        projectId: project.id,
-        vercelProjectId: projectId,
-        dnsRecordId,
-        customDomain
-      });
+    return c.json({
+      id: project.id,
+      name: result.name,
+      status: 'creating',
+      message: 'Project creation started'
+    });
 
-      await updateProjectStatus({
-        projectId: project.id,
-        status: 'creating',
-        message: 'Repository setup complete'
-      });
-
-      // Verify domain with exponential backoff
-      const domainVerified = await retryWithBackoff(
-        async () => {
-          const isVerified = await checkDomainStatus(projectId, body.name);
-          if (!isVerified) throw new Error('Domain not verified');
-          return true;
-        },
-        10,
-        1000,
-        async (attempt, error) => {
-          await updateProjectStatus({
-            projectId: project.id,
-            status: 'deploying',
-            message: `Verifying domain status (attempt ${attempt}/10)`,
-            error: error.toString()
-          });
-        }
-      );
-
-      if (!domainVerified) {
-        throw new Error('Domain verification failed after multiple attempts');
-      }
-
-      const deploymentSuccess = await handleDeploymentWithRetries(
-        projectId,
-        octokit,
-        body.name,
-        `https://github.com/productstudioinc/${body.name}`
-      );
-
-      if (!deploymentSuccess) {
-        throw new Error('Deployment failed after multiple attempts');
-      }
-
-      await updateProjectStatus({
-        projectId: project.id,
-        status: 'deployed',
-        message: 'Project successfully deployed',
-        deployedAt: new Date()
-      });
-
-      console.log(`Project ${body.name} successfully created and deployed`);
-      return c.json({
-        custom_domain: customDomain,
-        dns_record_id: dnsRecordId,
-        project_id: projectId,
-        status: 'success',
-        message: body.prompt
-          ? 'Repository created and deployed with AI-generated changes'
-          : 'Repository created and deployed'
-      });
-    } catch (error) {
-      // If we fail after creating the project, update its status to failed
-      await updateProjectStatus({
-        projectId: project.id,
-        status: 'failed',
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
-        error: error instanceof Error ? error.toString() : String(error)
-      });
-      throw error;
-    }
   } catch (error) {
     handleError(error);
   }
 })
+
+async function processProjectSetup(
+  project: { id: string },
+  octokit: any,
+  name: string,
+  prompt: string
+) {
+  try {
+    const { projectId, dnsRecordId, customDomain } = await retryWithBackoff(
+      () => setupRepository(octokit, name, prompt),
+      3,
+      2000,
+      async (attempt, error) => {
+        await updateProjectStatus({
+          projectId: project.id,
+          status: 'creating',
+          message: `Setting up repository (attempt ${attempt}/3)`,
+          error: error.toString()
+        });
+      }
+    );
+
+    await updateProjectDetails({
+      projectId: project.id,
+      vercelProjectId: projectId,
+      dnsRecordId,
+      customDomain
+    });
+
+    await updateProjectStatus({
+      projectId: project.id,
+      status: 'creating',
+      message: 'Repository setup complete'
+    });
+
+    const domainVerified = await retryWithBackoff(
+      async () => {
+        const isVerified = await checkDomainStatus(projectId, name);
+        if (!isVerified) throw new Error('Domain not verified');
+        return true;
+      },
+      10,
+      1000,
+      async (attempt, error) => {
+        await updateProjectStatus({
+          projectId: project.id,
+          status: 'deploying',
+          message: `Verifying domain status (attempt ${attempt}/10)`,
+          error: error.toString()
+        });
+      }
+    );
+
+    if (!domainVerified) {
+      throw new Error('Domain verification failed after multiple attempts');
+    }
+
+    const deploymentSuccess = await handleDeploymentWithRetries(
+      projectId,
+      octokit,
+      name,
+      `https://github.com/productstudioinc/${name}`
+    );
+
+    if (!deploymentSuccess) {
+      throw new Error('Deployment failed after multiple attempts');
+    }
+
+    await updateProjectStatus({
+      projectId: project.id,
+      status: 'deployed',
+      message: 'Project successfully deployed',
+      deployedAt: new Date()
+    });
+
+    console.log(`Project ${name} successfully created and deployed`);
+  } catch (error) {
+    await updateProjectStatus({
+      projectId: project.id,
+      status: 'failed',
+      message: error instanceof Error ? error.message : 'Unknown error occurred',
+      error: error instanceof Error ? error.toString() : String(error)
+    });
+    console.error('Background task failed:', error);
+  }
+}
 
 app.post('/refine', async c => {
   const body = await refineRequestSchema.parseAsync(await c.req.json())
