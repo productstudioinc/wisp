@@ -14,6 +14,9 @@ import { createProject, deleteProject, getProject, updateProjectStatus, updatePr
 import { generateObject, generateText, streamText } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { groq } from '@ai-sdk/groq'
+import { db } from '../services/db'
+import { eq, like } from 'drizzle-orm'
+import { projects } from '../services/db/schema'
 
 const createRequestSchema = zfd.formData({
   name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens'),
@@ -94,28 +97,50 @@ app.delete('/projects/:name', async (c) => {
   }
 })
 
+async function findAvailableProjectName(baseName: string): Promise<string> {
+  const existingProjects = await db.select({ name: projects.name })
+    .from(projects)
+    .where(like(projects.name, `${baseName}%`));
+
+  if (existingProjects.length === 0) return baseName;
+
+  const namePattern = new RegExp(`^${baseName}(-\\d+)?$`);
+  const numbers = existingProjects
+    .map(p => p.name.match(namePattern))
+    .filter((match): match is RegExpMatchArray => match !== null)
+    .map(match => {
+      const num = match[1] ? Number.parseInt(match[1].slice(1), 10) : 1;
+      return num;
+    });
+
+  const maxNumber = Math.max(0, ...numbers);
+  return `${baseName}-${maxNumber + 1}`;
+}
+
 app.post('/projects', async (c) => {
   const formData = await c.req.formData()
   const result = await createRequestSchema.parseAsync(formData)
-  console.log(`Creating new project: ${result.name}`)
+  console.log(`Requested project name: ${result.name}`)
 
   try {
     const octokit = c.get('octokit')
+    const availableName = await findAvailableProjectName(result.name)
+    console.log(`Using available project name: ${availableName}`)
 
     const project = await createProject({
       userId: result.userId,
-      name: result.name,
+      name: availableName,
       prompt: result.description,
       projectId: '',
     })
 
-    processProjectSetup(project, octokit, result.name, result.description).catch(error => {
+    processProjectSetup(project, octokit, availableName, result.description).catch(error => {
       console.error('Background task failed:', error);
     });
 
     return c.json({
       id: project.id,
-      name: result.name,
+      name: availableName,
       status: 'creating',
       message: 'Project creation started'
     });
