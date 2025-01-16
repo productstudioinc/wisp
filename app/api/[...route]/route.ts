@@ -15,9 +15,6 @@ import { generateObject, generateText, streamText } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { groq } from '@ai-sdk/groq'
 
-const MAX_RETRIES = 5;
-const INITIAL_RETRY_DELAY = 2000; // 2 seconds
-
 const createRequestSchema = zfd.formData({
   name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens'),
   description: z.string(),
@@ -36,34 +33,6 @@ const app = new Hono<{ Variables: Variables }>().basePath('/api')
 
 app.use('*', withGithubAuth)
 
-async function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function retryWithBackoff<T>(
-  operation: () => Promise<T>,
-  retries = MAX_RETRIES,
-  delay = INITIAL_RETRY_DELAY,
-  onRetry?: (attempt: number, error: Error) => void
-): Promise<T> {
-  let lastError: Error;
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await operation();
-    } catch (error: any) {
-      lastError = error;
-      if (onRetry) onRetry(attempt, error);
-
-      if (attempt === retries) break;
-      await sleep(delay * 2 ** (attempt - 1));
-    }
-  }
-
-  // biome-ignore lint/style/noNonNullAssertion: <explanation>
-  throw lastError!;
-}
-
 function handleError(error: unknown) {
   console.error('Error details:', error instanceof ProjectError ? error.toString() : error);
 
@@ -74,7 +43,6 @@ function handleError(error: unknown) {
 
     throw new HTTPException(status, {
       message: error.message,
-
     });
   }
 
@@ -108,19 +76,11 @@ app.delete('/projects/:name', async (c) => {
     const octokit = c.get('octokit')
     const project = await getProject(query.data.project_id)
 
-    // Delete resources in parallel with proper error handling
-    const results = await Promise.allSettled([
-      retryWithBackoff(() => deleteRepository(octokit, 'productstudioinc', params), 3),
-      retryWithBackoff(() => deleteDomainRecord(query.data.dns_record_id), 3),
-      retryWithBackoff(() => deleteVercelProject(query.data.project_id), 3)
+    await Promise.all([
+      deleteRepository(octokit, 'productstudioinc', params),
+      deleteDomainRecord(query.data.dns_record_id),
+      deleteVercelProject(query.data.project_id)
     ]);
-
-    // Check for any failures
-    const failures = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
-    if (failures.length > 0) {
-      const failureDetails = failures.map(f => f.reason).join('\n');
-      throw new Error(`Failed to delete project resources:\n${failureDetails}`);
-    }
 
     await deleteProject(query.data.project_id);
     console.log(`Successfully deleted project ${params} and associated resources`);
@@ -142,12 +102,11 @@ app.post('/projects', async (c) => {
   try {
     const octokit = c.get('octokit')
 
-    // Create project in database first
     const project = await createProject({
       userId: result.userId,
       name: result.name,
       prompt: result.description,
-      projectId: '', // Will be updated after repository setup
+      projectId: '',
     })
 
     processProjectSetup(project, octokit, result.name, result.description).catch(error => {
@@ -173,19 +132,7 @@ async function processProjectSetup(
   prompt: string
 ) {
   try {
-    const { projectId, dnsRecordId, customDomain } = await retryWithBackoff(
-      () => setupRepository(octokit, name, prompt),
-      3,
-      2000,
-      async (attempt, error) => {
-        await updateProjectStatus({
-          projectId: project.id,
-          status: 'creating',
-          message: `Setting up repository (attempt ${attempt}/3)`,
-          error: error.toString()
-        });
-      }
-    );
+    const { projectId, dnsRecordId, customDomain } = await setupRepository(octokit, name, prompt);
 
     await updateProjectDetails({
       projectId: project.id,
@@ -200,26 +147,9 @@ async function processProjectSetup(
       message: 'Repository setup complete'
     });
 
-    const domainVerified = await retryWithBackoff(
-      async () => {
-        const isVerified = await checkDomainStatus(projectId, name);
-        if (!isVerified) throw new Error('Domain not verified');
-        return true;
-      },
-      10,
-      1000,
-      async (attempt, error) => {
-        await updateProjectStatus({
-          projectId: project.id,
-          status: 'deploying',
-          message: `Verifying domain status (attempt ${attempt}/10)`,
-          error: error.toString()
-        });
-      }
-    );
-
-    if (!domainVerified) {
-      throw new Error('Domain verification failed after multiple attempts');
+    const isVerified = await checkDomainStatus(projectId, name);
+    if (!isVerified) {
+      throw new Error('Domain verification failed');
     }
 
     const deploymentSuccess = await handleDeploymentWithRetries(
@@ -230,7 +160,7 @@ async function processProjectSetup(
     );
 
     if (!deploymentSuccess) {
-      throw new Error('Deployment failed after multiple attempts');
+      throw new Error('Deployment failed');
     }
 
     await updateProjectStatus({
@@ -313,7 +243,6 @@ Remember, the questions should be designed to gather information that will help 
 
   return c.json(object)
 })
-
 
 export const POST = handle(app)
 export const DELETE = handle(app)
