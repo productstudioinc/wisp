@@ -10,9 +10,11 @@ import { deleteDomainRecord } from '../services/cloudflare'
 import { setupRepository } from '../services/repository'
 import { handleDeploymentWithRetries } from '../services/deployment'
 import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, ProjectError } from '../services/db/queries'
-import { streamText } from 'ai'
+import { generateObject, generateText, streamText } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { stream } from 'hono/streaming';
+import { openai } from '@ai-sdk/openai'
+import { groq } from '@ai-sdk/groq'
 
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 2000; // 2 seconds
@@ -21,6 +23,11 @@ const createRequestSchema = z.object({
   name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens'),
   prompt: z.string().optional(),
   userId: z.string().uuid()
+})
+
+const refineRequestSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
 })
 
 const app = new Hono<{ Variables: Variables }>().basePath('/api')
@@ -236,16 +243,68 @@ app.post('/projects', async (c) => {
   }
 })
 
-app.post('/chat', async c => {
-  const result = streamText({
-    model: anthropic('claude-3-5-sonnet-20240620'),
-    prompt: 'Invent a new holiday and describe its traditions.',
+app.post('/refine', async c => {
+  const body = await refineRequestSchema.parseAsync(await c.req.json())
+  const result = await generateText({
+    model: anthropic('claude-3-5-sonnet-latest'),
+    prompt: `You are an AI assistant specialized in product development, particularly in helping users generate ideas for personalized apps. Your task is to analyze an app concept and provide tailored questions and image suggestions to help refine the app idea.
+
+Here's the app concept you need to work with:
+
+App Name: ${body.name}
+App Description: ${body.description}
+
+Your goal is to generate:
+1. A list of 3-5 questions that will help personalize the app that are concise and not overly specific.
+2. A single string of suggestions for images that users could provide to enhance the app's development.
+
+Before providing your final output, in <app_analysis> tags:
+
+1. Break down the app concept into key features and potential target audience.
+2. Brainstorm a list of 8-10 potential questions related to personalizing the app.
+3. Narrow down the list to the 3-5 most effective questions that are tailored but not overly specific.
+4. Consider different aspects of the app that could benefit from visual elements and list potential image categories.
+
+Make sure to focus on creating questions that are tailored towards creating a personalized app without being so specific that they limit the app's potential.
+
+<app_analysis>
+[Your analysis of the app concept, breakdown of features, target audience, question brainstorming, question selection, and image suggestion consideration goes here.]
+</app_analysis>
+
+After your analysis, please provide your final output in the following format:
+
+<output>
+Questions:
+1. [Question 1]
+2. [Question 2]
+3. [Question 3]
+(Add more if necessary, up to 5 questions)
+
+Image Suggestions: [A single string of suggestions for types of images to upload]
+</output>
+
+Remember, the questions should be designed to gather information that will help personalize the app without being so specific that they limit the app's potential or make it impossible to generate. The image suggestions should be general enough to apply to various users while still being relevant to the app concept.`,
   })
 
-  c.header('Content-Type', 'text/plain; charset=utf-8');
+  console.log(result.text)
 
-  return stream(c, stream => stream.pipe(result.textStream));
+  const { object } = await generateObject({
+    model: groq('llama-3.1-8b-instant'),
+    schema: z.object({
+      questions: z.string().array(),
+      imageSuggestions: z.string()
+    }),
+    prompt: `From this analysis, generate a JSON object with the questions and image suggestions for my app. Do not modify or include any other text.
+
+    Analysis: ${result.text}
+    `
+  })
+
+  console.log(object)
+
+  return c.json(object)
 })
+
 
 export const POST = handle(app)
 export const DELETE = handle(app)
