@@ -27,6 +27,7 @@ const createRequestSchema = zfd.formData({
   additionalInfo: zfd.text(z.string().optional()),
   icon: zfd.file().optional(),
   images: zfd.repeatableOfType(zfd.file()).optional(),
+  private: z.boolean().optional(),
 })
 
 const refineRequestSchema = z.object({
@@ -134,6 +135,7 @@ app.post('/projects', async (c) => {
       name: availableName,
       prompt: result.description,
       projectId: '',
+      private: result.private,
     })
 
     processProjectSetup(project, octokit, availableName, result.description).catch(error => {
