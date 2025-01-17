@@ -5,43 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1736737748128,
-      "tag": "0000_striped_prodigy",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1736739767826,
-      "tag": "0001_gorgeous_tana_nile",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1736742516469,
-      "tag": "0002_curly_the_call",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1736808228403,
-      "tag": "0003_abandoned_mongoose",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1736808311115,
-      "tag": "0004_nifty_invisible_woman",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1737071892342,
-      "tag": "0005_stale_anthem",
+      "when": 1737072384702,
+      "tag": "0000_real_joystick",
       "breakpoints": true
     }
   ]
