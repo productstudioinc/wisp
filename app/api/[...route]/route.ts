@@ -10,13 +10,15 @@ import { deleteProject as deleteVercelProject, checkDomainStatus } from '../serv
 import { deleteDomainRecord } from '../services/cloudflare'
 import { setupRepository } from '../services/repository'
 import { handleDeploymentWithRetries } from '../services/deployment'
-import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, ProjectError } from '../services/db/queries'
+import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, ProjectError, getUserProjects } from '../services/db/queries'
 import { generateObject, generateText, streamText } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { groq } from '@ai-sdk/groq'
 import { db } from '../services/db'
 import { eq, like } from 'drizzle-orm'
 import { projects } from '../services/db/schema'
+import { users } from '../services/db/schema'
+import { supabase } from '../services/supabase'
 
 const createRequestSchema = zfd.formData({
   name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens'),
@@ -267,6 +269,44 @@ Remember, the questions should be designed to gather information that will help 
   console.log(object)
 
   return c.json(object)
+})
+
+app.delete('/users/:id', async (c) => {
+  const userId = c.req.param('id')
+  console.log(`Deleting user: ${userId}`)
+
+  try {
+    const userProjects = await getUserProjects(userId)
+
+    await Promise.all(userProjects.map(async (project) => {
+      if (project.projectId && project.dnsRecordId && project.name) {
+        await Promise.all([
+          deleteRepository(c.get('octokit'), 'productstudioinc', project.name),
+          deleteDomainRecord(project.dnsRecordId),
+          deleteVercelProject(project.projectId)
+        ]);
+      }
+    }));
+
+    await db.delete(projects).where(eq(projects.userId, userId));
+
+    await db.delete(users).where(eq(users.id, userId));
+
+    const { error } = await supabase.auth.admin.deleteUser(userId)
+
+    if (error) {
+      throw new Error('Failed to delete user from Supabase');
+    }
+
+    console.log('User deleted from Supabase')
+
+    return c.json({
+      status: 'success',
+      message: 'User and all associated projects deleted successfully'
+    })
+  } catch (error) {
+    handleError(error);
+  }
 })
 
 export const POST = handle(app)
