@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, pgEnum, index, boolean, time } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, pgEnum, index, boolean, timestamp } from "drizzle-orm/pg-core";
 
 export const projectStatus = pgEnum('project_status', ['creating', 'deploying', 'deployed', 'failed', 'deleted']);
 
@@ -18,10 +18,10 @@ export const projects = pgTable('projects', {
   prompt: text('prompt'),
   status: projectStatus('status').notNull().default('creating'),
   statusMessage: text('status_message'),
-  lastUpdated: time('last_updated', { withTimezone: true }).defaultNow(),
-  createdAt: time('created_at', { withTimezone: true }).defaultNow(),
+  lastUpdated: timestamp('last_updated', { withTimezone: true }).defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   error: text('error'),
-  deployedAt: time('deployed_at', { withTimezone: true }).defaultNow(),
+  deployedAt: timestamp('deployed_at', { withTimezone: true }),
   private: boolean('private').notNull().default(false),
 }, (table) => {
   return {
