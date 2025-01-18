@@ -113,7 +113,7 @@ export async function createProject({
       userId,
       name,
       prompt,
-      projectId,
+      vercelProjectId: projectId,
       dnsRecordId,
       customDomain,
       private: isPrivate,
@@ -198,7 +198,7 @@ export async function updateProjectStatus({
 
 export async function deleteProject(projectId: string) {
   try {
-    const project = await db.select().from(projects).where(eq(projects.projectId, projectId)).limit(1);
+    const project = await db.select().from(projects).where(eq(projects.vercelProjectId, projectId)).limit(1);
 
     if (!project.length) {
       throw createError(
@@ -209,7 +209,7 @@ export async function deleteProject(projectId: string) {
       );
     }
 
-    await db.delete(projects).where(eq(projects.projectId, projectId));
+    await db.delete(projects).where(eq(projects.vercelProjectId, projectId));
   } catch (error) {
     if (error instanceof ProjectError) throw error;
 
@@ -226,19 +226,19 @@ export async function deleteProject(projectId: string) {
   }
 }
 
-export async function getProject(projectId: string) {
+export async function getProject(id: string) {
   try {
     const project = await db.select()
       .from(projects)
-      .where(eq(projects.projectId, projectId))
+      .where(eq(projects.id, id))
       .limit(1);
 
     if (!project.length) {
       throw createError(
         'PROJECT_NOT_FOUND',
-        `Project with ID "${projectId}" not found`,
+        `Project with ID "${id}" not found`,
         'getProject',
-        { projectId }
+        { id }
       );
     }
 
@@ -251,7 +251,7 @@ export async function getProject(projectId: string) {
       'Failed to fetch project',
       'getProject',
       {
-        projectId,
+        id,
         attemptedOperation: 'select',
       },
       error
@@ -348,7 +348,7 @@ export async function updateProjectDetails({
 
     const updatedProject = await db.update(projects)
       .set({
-        projectId: vercelProjectId,
+        vercelProjectId,
         dnsRecordId,
         customDomain,
         lastUpdated: new Date(),
@@ -367,6 +367,41 @@ export async function updateProjectDetails({
       {
         projectId,
         attemptedOperation: 'update_details',
+      },
+      error
+    );
+  }
+}
+
+export async function updateMobileScreenshot(projectId: string, screenshotUrl: string) {
+  try {
+    const project = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+
+    if (!project.length) {
+      throw createError(
+        'PROJECT_NOT_FOUND',
+        `Project with ID "${projectId}" not found`,
+        'updateMobileScreenshot',
+        { projectId }
+      );
+    }
+
+    const updatedProject = await db.update(projects)
+      .set({ mobileScreenshot: screenshotUrl })
+      .where(eq(projects.id, projectId))
+      .returning();
+
+    return updatedProject[0];
+  } catch (error) {
+    if (error instanceof ProjectError) throw error;
+
+    throw createError(
+      'UPDATE_FAILED',
+      'Failed to update mobile screenshot',
+      'updateMobileScreenshot',
+      {
+        projectId,
+        attemptedOperation: 'update_screenshot',
       },
       error
     );

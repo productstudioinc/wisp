@@ -1,0 +1,1 @@
+ALTER TABLE "projects" RENAME COLUMN "project_id" TO "vercel_project_id";

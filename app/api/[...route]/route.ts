@@ -10,7 +10,7 @@ import { deleteProject as deleteVercelProject, checkDomainStatus } from '../serv
 import { deleteDomainRecord } from '../services/cloudflare'
 import { setupRepository } from '../services/repository'
 import { handleDeploymentWithRetries } from '../services/deployment'
-import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, ProjectError, getUserProjects } from '../services/db/queries'
+import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, updateMobileScreenshot, ProjectError, getUserProjects } from '../services/db/queries'
 import { generateObject, generateText, streamText } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { groq } from '@ai-sdk/groq'
@@ -19,6 +19,7 @@ import { eq, like } from 'drizzle-orm'
 import { projects } from '../services/db/schema'
 import { users } from '../services/db/schema'
 import { supabase } from '../services/supabase'
+import { captureAndStoreMobileScreenshot } from '../services/screenshot'
 
 const createRequestSchema = zfd.formData({
   name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens'),
@@ -161,11 +162,13 @@ async function processProjectSetup(
   prompt: string
 ) {
   try {
-    const { projectId, dnsRecordId, customDomain } = await setupRepository(octokit, name, prompt);
+    const { projectId: vercelProjectId, dnsRecordId, customDomain } = await setupRepository(octokit, name, prompt);
+
+    const projectDetails = await getProject(project.id);
 
     await updateProjectDetails({
       projectId: project.id,
-      vercelProjectId: projectId,
+      vercelProjectId,
       dnsRecordId,
       customDomain
     });
@@ -176,13 +179,13 @@ async function processProjectSetup(
       message: 'Repository setup complete'
     });
 
-    const isVerified = await checkDomainStatus(projectId, name);
+    const isVerified = await checkDomainStatus(vercelProjectId, name);
     if (!isVerified) {
       throw new Error('Domain verification failed');
     }
 
     const deploymentSuccess = await handleDeploymentWithRetries(
-      projectId,
+      vercelProjectId,
       octokit,
       name,
       `https://github.com/productstudioinc/${name}`
@@ -190,6 +193,17 @@ async function processProjectSetup(
 
     if (!deploymentSuccess) {
       throw new Error('Deployment failed');
+    }
+
+    try {
+      const screenshotUrl = await captureAndStoreMobileScreenshot(
+        project.id,
+        projectDetails.userId,
+        `https://${name}.usewisp.app`
+      );
+      await updateMobileScreenshot(project.id, screenshotUrl);
+    } catch (screenshotError) {
+      console.error('Failed to capture screenshot:', screenshotError);
     }
 
     await updateProjectStatus({
@@ -281,11 +295,11 @@ app.delete('/users/:id', async (c) => {
     const userProjects = await getUserProjects(userId)
 
     await Promise.all(userProjects.map(async (project) => {
-      if (project.projectId && project.dnsRecordId && project.name) {
+      if (project.vercelProjectId && project.dnsRecordId && project.name) {
         await Promise.all([
           deleteRepository(c.get('octokit'), 'productstudioinc', project.name),
           deleteDomainRecord(project.dnsRecordId),
-          deleteVercelProject(project.projectId)
+          deleteVercelProject(project.vercelProjectId)
         ]);
       }
     }));

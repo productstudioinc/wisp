@@ -12,7 +12,7 @@ export const projects = pgTable('projects', {
   id: uuid('id').primaryKey().notNull(),
   name: text('name').notNull(),
   userId: uuid('user_id').references(() => users.id).notNull(),
-  projectId: text('project_id').notNull(),
+  vercelProjectId: text('vercel_project_id').notNull(),
   dnsRecordId: text('dns_record_id'),
   customDomain: text('custom_domain'),
   prompt: text('prompt'),
@@ -23,6 +23,7 @@ export const projects = pgTable('projects', {
   error: text('error'),
   deployedAt: timestamp('deployed_at', { withTimezone: true }),
   private: boolean('private').notNull().default(false),
+  mobileScreenshot: text('mobile_screenshot'),
 }, (table) => {
   return {
     userIdIdx: index('user_id_idx').on(table.userId)

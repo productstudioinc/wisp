@@ -170,7 +170,6 @@ Be precise and minimal in your changes. Do not add features or make unrelated mo
 Only include files that need to be modified to fix the error.`,
       })
 
-      console.dir('Implementation', implementation)
       return implementation
     },
     repoContent,
