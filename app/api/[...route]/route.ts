@@ -65,32 +65,47 @@ function handleError(error: unknown) {
 }
 
 app.delete('/projects/:name', async (c) => {
-  const params = c.req.param('name')
-  console.log(`Deleting project: ${params}`)
+  const projectName = c.req.param('name')
+  console.log(`Deleting project: ${projectName}`)
 
-  const query = z.object({
-    dns_record_id: z.string().min(1),
-    project_id: z.string().min(1)
-  }).safeParse(c.req.query())
-
-  if (!query.success) {
-    throw new HTTPException(400, {
-      message: 'Invalid query parameters',
+  const body = await z.object({
+    userId: z.string().uuid()
+  }).parseAsync(await c.req.json())
+    .catch(() => {
+      throw new HTTPException(400, {
+        message: 'Invalid request body: userId is required',
+      });
     });
-  }
 
   try {
     const octokit = c.get('octokit')
-    const project = await getProject(query.data.project_id)
+
+    const project = await db.select()
+      .from(projects)
+      .where(eq(projects.name, projectName))
+      .limit(1)
+      .then(results => results[0]);
+
+    if (!project) {
+      throw new HTTPException(404, {
+        message: `Project "${projectName}" not found`,
+      });
+    }
+
+    if (project.userId !== body.userId) {
+      throw new HTTPException(403, {
+        message: 'Unauthorized: Project does not belong to the user',
+      });
+    }
 
     await Promise.all([
-      deleteRepository(octokit, 'productstudioinc', params),
-      deleteDomainRecord(query.data.dns_record_id),
-      deleteVercelProject(query.data.project_id)
+      deleteRepository(octokit, 'productstudioinc', projectName),
+      project.dnsRecordId ? deleteDomainRecord(project.dnsRecordId) : Promise.resolve(),
+      project.vercelProjectId ? deleteVercelProject(project.vercelProjectId) : Promise.resolve(),
     ]);
 
-    await deleteProject(query.data.project_id);
-    console.log(`Successfully deleted project ${params} and associated resources`);
+    await db.delete(projects).where(eq(projects.id, project.id));
+    console.log(`Successfully deleted project ${projectName} and associated resources`);
 
     return c.json({
       status: 'success',
