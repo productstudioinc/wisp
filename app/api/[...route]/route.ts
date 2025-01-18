@@ -10,7 +10,7 @@ import { deleteProject as deleteVercelProject, checkDomainStatus } from '../serv
 import { deleteDomainRecord } from '../services/cloudflare'
 import { setupRepository } from '../services/repository'
 import { handleDeploymentWithRetries } from '../services/deployment'
-import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, updateMobileScreenshot, ProjectError, getUserProjects } from '../services/db/queries'
+import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, updateMobileScreenshot, ProjectError, getUserProjects, getProjectByName } from '../services/db/queries'
 import { generateObject, generateText, streamText } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { groq } from '@ai-sdk/groq'
@@ -79,18 +79,7 @@ app.delete('/projects/:name', async (c) => {
 
   try {
     const octokit = c.get('octokit')
-
-    const project = await db.select()
-      .from(projects)
-      .where(eq(projects.name, projectName))
-      .limit(1)
-      .then(results => results[0]);
-
-    if (!project) {
-      throw new HTTPException(404, {
-        message: `Project "${projectName}" not found`,
-      });
-    }
+    const project = await getProjectByName(projectName);
 
     if (project.userId !== body.userId) {
       throw new HTTPException(403, {
@@ -102,6 +91,10 @@ app.delete('/projects/:name', async (c) => {
       deleteRepository(octokit, 'productstudioinc', projectName),
       project.dnsRecordId ? deleteDomainRecord(project.dnsRecordId) : Promise.resolve(),
       project.vercelProjectId ? deleteVercelProject(project.vercelProjectId) : Promise.resolve(),
+      supabase.storage
+        .from('project-screenshots')
+        .remove([`${project.userId}/${project.id}/screenshot.jpg`])
+        .catch(error => console.error('Failed to delete screenshot:', error)),
     ]);
 
     await db.delete(projects).where(eq(projects.id, project.id));
@@ -109,7 +102,7 @@ app.delete('/projects/:name', async (c) => {
 
     return c.json({
       status: 'success',
-      message: 'Repository, domain record, and project deleted successfully'
+      message: 'Repository, domain record, project and screenshot deleted successfully'
     })
   } catch (error) {
     handleError(error);

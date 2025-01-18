@@ -407,3 +407,37 @@ export async function updateMobileScreenshot(projectId: string, screenshotUrl: s
     );
   }
 }
+
+export async function getProjectByName(name: string) {
+  try {
+    const project = await db.select()
+      .from(projects)
+      .where(eq(projects.name, name))
+      .limit(1)
+      .then(results => results[0]);
+
+    if (!project) {
+      throw createError(
+        'PROJECT_NOT_FOUND',
+        `Project with name "${name}" not found`,
+        'getProjectByName',
+        { name }
+      );
+    }
+
+    return project;
+  } catch (error) {
+    if (error instanceof ProjectError) throw error;
+
+    throw createError(
+      'FETCH_FAILED',
+      'Failed to fetch project by name',
+      'getProjectByName',
+      {
+        name,
+        attemptedOperation: 'select',
+      },
+      error
+    );
+  }
+}
