@@ -22,7 +22,7 @@ import { supabase } from '../services/supabase'
 import { captureAndStoreMobileScreenshot } from '../services/screenshot'
 
 const createRequestSchema = zfd.formData({
-  name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens'),
+  name: z.string(),
   description: z.string(),
   userId: z.string().uuid(),
   questions: z.string().optional(),
@@ -117,7 +117,9 @@ app.post('/projects', async (c) => {
 
   try {
     const octokit = c.get('octokit')
-    const availableName = await findAvailableProjectName(result.name)
+    const displayName = result.name
+    const formattedName = result.name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    const availableName = await findAvailableProjectName(formattedName)
     console.log(`Using available project name: ${availableName}`)
 
     // Parse questions if they exist
@@ -158,7 +160,7 @@ Response format: Just return the concise description, nothing else.`
       userId: result.userId,
       name: availableName,
       description: conciseDescription.text,
-      displayName: result.name,
+      displayName: displayName,
       projectId: '',
       private: result.private,
     })

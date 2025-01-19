@@ -59,11 +59,7 @@ export function Pricing() {
                 </div>
               ))}
             </div>
-            <Button
-              variant={"default"}
-              size="sm"
-              className="rounded-full text-white"
-            >
+            <Button variant={"default"} size="sm" className="rounded-full">
               Get Started
               <ChevronRightIcon className="w-4 h-4 ml-1" />
             </Button>

@@ -76,7 +76,7 @@ export function Header() {
                 href="#"
                 className={cn(
                   buttonVariants({ variant: "default" }),
-                  "h-8 text-white rounded-full group"
+                  "h-8  rounded-full group"
                 )}
               >
                 {siteConfig.cta}
