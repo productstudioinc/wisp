@@ -10,5 +10,10 @@ export const metadata: Metadata = constructMetadata({
 
 export default function Privacy() {
   const post = allLegals.find((post) => post.title === "Privacy Policy");
+
+  if (!post) {
+    throw new Error("Privacy Policy not found");
+  }
+
   return <LegalPage page={post} />;
 }
