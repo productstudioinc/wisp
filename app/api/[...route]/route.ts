@@ -10,7 +10,7 @@ import { deleteProject as deleteVercelProject, checkDomainStatus } from '../serv
 import { deleteDomainRecord } from '../services/cloudflare'
 import { setupRepository } from '../services/repository'
 import { handleDeploymentWithRetries } from '../services/deployment'
-import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, updateMobileScreenshot, ProjectError, getUserProjects, getProjectByName } from '../services/db/queries'
+import { createProject, deleteProject, getProject, updateProjectStatus, updateProjectDetails, updateMobileScreenshot, ProjectError, getUserProjects, getProjectByName, findAvailableProjectName } from '../services/db/queries'
 import { generateObject, generateText, streamText } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { groq } from '@ai-sdk/groq'
@@ -25,6 +25,7 @@ const createRequestSchema = zfd.formData({
   name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, 'Repository name must only contain letters, numbers, underscores, and hyphens'),
   description: z.string(),
   userId: z.string().uuid(),
+  questions: z.string().optional(),
   additionalInfo: zfd.text(z.string().optional()),
   icon: zfd.file().optional(),
   images: zfd.repeatableOfType(zfd.file()).optional(),
@@ -109,26 +110,6 @@ app.delete('/projects/:name', async (c) => {
   }
 })
 
-async function findAvailableProjectName(baseName: string): Promise<string> {
-  const existingProjects = await db.select({ name: projects.name })
-    .from(projects)
-    .where(like(projects.name, `${baseName}%`));
-
-  if (existingProjects.length === 0) return baseName;
-
-  const namePattern = new RegExp(`^${baseName}(-\\d+)?$`);
-  const numbers = existingProjects
-    .map(p => p.name.match(namePattern))
-    .filter((match): match is RegExpMatchArray => match !== null)
-    .map(match => {
-      const num = match[1] ? Number.parseInt(match[1].slice(1), 10) : 1;
-      return num;
-    });
-
-  const maxNumber = Math.max(0, ...numbers);
-  return `${baseName}-${maxNumber + 1}`;
-}
-
 app.post('/projects', async (c) => {
   const formData = await c.req.formData()
   const result = await createRequestSchema.parseAsync(formData)
@@ -139,21 +120,57 @@ app.post('/projects', async (c) => {
     const availableName = await findAvailableProjectName(result.name)
     console.log(`Using available project name: ${availableName}`)
 
+    // Parse questions if they exist
+    let questionsContext = ''
+    if (result.questions) {
+      try {
+        const questions = JSON.parse(result.questions)
+        questionsContext = `\n\nAdditional context from questions:\n${Object.entries(questions)
+          .map(([question, answer]) => `${question}: ${answer}`)
+          .join('\n')
+          }`
+      } catch (e) {
+        console.error('Failed to parse questions:', e)
+      }
+    }
+
+    // Generate a concise description
+    const conciseDescription = await generateText({
+      model: anthropic('claude-3-5-sonnet-latest'),
+      prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
+
+Description: ${result.description}${questionsContext}
+
+Example 1:
+Description: Make a love language tracker for me and jake to see who's more romantic
+Questions: Theme preference: Romantic and elegant
+Output: A love language tracker for my boyfriend Jake with a romantic theme
+
+Example 2:
+Description: Create a workout tracker
+Questions: Preferred workout type: Weightlifting, Goal: Build muscle mass
+Output: A weightlifting tracker focused on muscle-building progress
+
+Response format: Just return the concise description, nothing else.`
+    });
+
     const project = await createProject({
       userId: result.userId,
       name: availableName,
-      prompt: result.description,
+      description: conciseDescription.text,
+      displayName: result.name,
       projectId: '',
       private: result.private,
     })
 
-    processProjectSetup(project, octokit, availableName, result.description).catch(error => {
+    processProjectSetup(project, octokit, availableName, result.description + questionsContext).catch(error => {
       console.error('Background task failed:', error);
     });
 
     return c.json({
       id: project.id,
       name: availableName,
+      displayName: result.name,
       status: 'creating',
       message: 'Project creation started'
     });
@@ -167,10 +184,10 @@ async function processProjectSetup(
   project: { id: string },
   octokit: any,
   name: string,
-  prompt: string
+  description: string
 ) {
   try {
-    const { projectId: vercelProjectId, dnsRecordId, customDomain } = await setupRepository(octokit, name, prompt);
+    const { projectId: vercelProjectId, dnsRecordId, customDomain } = await setupRepository(octokit, name, description);
 
     const projectDetails = await getProject(project.id);
 

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, like } from 'drizzle-orm';
 import { db } from './index';
 import { projects, type projectStatus, users } from './schema';
 
@@ -79,7 +79,8 @@ function createError(
 export async function createProject({
   userId,
   name,
-  prompt,
+  description,
+  displayName,
   projectId,
   dnsRecordId,
   customDomain,
@@ -87,7 +88,8 @@ export async function createProject({
 }: {
   userId: string;
   name: string;
-  prompt?: string;
+  description?: string;
+  displayName?: string;
   projectId: string;
   dnsRecordId?: string;
   customDomain?: string;
@@ -112,7 +114,8 @@ export async function createProject({
       id: crypto.randomUUID(),
       userId,
       name,
-      prompt,
+      description,
+      displayName,
       vercelProjectId: projectId,
       dnsRecordId,
       customDomain,
@@ -440,4 +443,24 @@ export async function getProjectByName(name: string) {
       error
     );
   }
+}
+
+export async function findAvailableProjectName(baseName: string): Promise<string> {
+  const existingProjects = await db.select({ name: projects.name })
+    .from(projects)
+    .where(like(projects.name, `${baseName}%`));
+
+  if (existingProjects.length === 0) return baseName;
+
+  const namePattern = new RegExp(`^${baseName}(-\\d+)?$`);
+  const numbers = existingProjects
+    .map(p => p.name.match(namePattern))
+    .filter((match): match is RegExpMatchArray => match !== null)
+    .map(match => {
+      const num = match[1] ? Number.parseInt(match[1].slice(1), 10) : 1;
+      return num;
+    });
+
+  const maxNumber = Math.max(0, ...numbers);
+  return `${baseName}-${maxNumber + 1}`;
 }
