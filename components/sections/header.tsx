@@ -67,7 +67,9 @@ export function Header() {
               className="relative mr-6 flex items-center space-x-2"
             >
               <Icons.logo className="h-10 w-10" />
-              <span className="font-bold text-xl">{siteConfig.name}</span>
+              <span className="text-2xl font-obviously mb-2">
+                {siteConfig.name}
+              </span>
             </Link>
             <div className="hidden lg:block">
               <Link

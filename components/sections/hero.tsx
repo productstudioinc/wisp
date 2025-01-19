@@ -38,7 +38,7 @@ export function Hero() {
             initial={{ y: -20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.6, delay: 1.2 }}
-            className="absolute inset-0 top-20 z-10"
+            className="absolute inset-0 top-20 z-10 font-obviously"
           >
             {siteConfig.name}
           </motion.div>

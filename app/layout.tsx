@@ -2,7 +2,7 @@ import { TailwindIndicator } from "@/components/tailwind-indicator";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { siteConfig } from "@/lib/config";
-import { fontSans } from "@/lib/fonts";
+import { fontSans, obviously } from "@/lib/fonts";
 import { cn, constructMetadata } from "@/lib/utils";
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
@@ -29,7 +29,8 @@ export default function RootLayout({
       <body
         className={cn(
           "min-h-screen bg-background antialiased w-full mx-auto scroll-smooth",
-          fontSans.variable
+          fontSans.variable,
+          obviously.variable
         )}
       >
         <ThemeProvider
