@@ -57,9 +57,10 @@ export function constructMetadata({
   };
 }
 
-export function formatDate(date: string) {
+export function formatDate(date: string | Date | number) {
   const currentDate = new Date().getTime();
-  const formattedDate = !date.includes("T") ? `${date}T00:00:00` : date;
+  const dateStr = typeof date === 'string' ? date : new Date(date).toISOString();
+  const formattedDate = !dateStr.includes("T") ? `${dateStr}T00:00:00` : dateStr;
   const targetDate = new Date(formattedDate).getTime();
   const timeDifference = Math.abs(currentDate - targetDate);
   const daysAgo = Math.floor(timeDifference / (1000 * 60 * 60 * 24));

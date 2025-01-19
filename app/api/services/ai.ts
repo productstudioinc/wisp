@@ -121,7 +121,8 @@ Ensure that your plan prioritizes mobile-first development, emphasizes type safe
           system: implementationSystemPrompt(),
           experimental_telemetry: {
             isEnabled: true
-          }
+          },
+          maxRetries: 3
         })
       )
 

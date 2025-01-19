@@ -6,6 +6,8 @@ import { fontSans, obviously } from "@/lib/fonts";
 import { cn, constructMetadata } from "@/lib/utils";
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { Header } from "@/components/sections/header";
+import { Footer } from "@/components/sections/footer";
 
 export const metadata: Metadata = constructMetadata({
   title: `${siteConfig.name} | ${siteConfig.description}`,
@@ -38,9 +40,11 @@ export default function RootLayout({
           defaultTheme="light"
           enableSystem={false}
         >
+          <Header />
           {children}
           <ThemeToggle />
           <TailwindIndicator />
+          <Footer />
         </ThemeProvider>
       </body>
     </html>

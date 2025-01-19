@@ -7,7 +7,6 @@ import { Hero } from "@/components/sections/hero";
 export default function Home() {
   return (
     <main className="relative">
-      <Header />
       <Hero />
       <FeatureScroll />
       <FeatureHighlight />
@@ -18,7 +17,6 @@ export default function Home() {
       {/* <Pricing /> */}
       {/* <FAQ /> */}
       {/* <CTA /> */}
-      <Footer />
     </main>
   );
 }

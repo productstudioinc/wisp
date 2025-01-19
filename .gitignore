@@ -38,3 +38,5 @@ lerna-debug.log*
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+.content-collections/
