@@ -1,8 +1,8 @@
 import { MDXContent } from "@content-collections/mdx/react";
 import { formatDate } from "@/lib/utils";
-import type { Page } from "content-collections";
+import type { Legal } from "content-collections";
 
-export default function LegalPage({ page }: { page: Page }) {
+export default function LegalPage({ page }: { page: Legal }) {
   return (
     <>
       <div className="py-20 sm:py-10">
