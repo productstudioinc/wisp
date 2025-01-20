@@ -274,6 +274,7 @@ Technical Limitations:
 CRITICAL: Must be fully responsive and mobile-first in UI. So think thoroughly about the UI/UX of the app being completely functional on mobile devices.
 IMPORTANT: Keep all new comopnents in the App.tsx file.
 IMPORTANT: You must not delete anything in the original src/index.css file, you can only add onto it or modify the color values in the @layer base section.
+IMPORTANT: You should ALWAYS change the title of the app in the src/index.html file to match the name of the app.
 
 Project Structure Requirements:
 1. Feature Breakdown:
