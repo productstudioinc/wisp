@@ -39,6 +39,10 @@ export async function captureAndStoreMobileScreenshot(
       });
     });
 
+    console.log('Waiting 25 seconds for deployment to stabilize...')
+    await new Promise(resolve => setTimeout(resolve, 25000))
+
+    console.log('Taking screenshot of:', url)
     await page.goto(url, { waitUntil: 'networkidle' });
     await page.waitForTimeout(2000);
 

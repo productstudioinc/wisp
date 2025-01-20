@@ -112,11 +112,10 @@ Ensure that your plan prioritizes mobile-first development, emphasizes type safe
         })
       )
 
-      const { object: implementation } = await observe(
+      const { text: implementation } = await observe(
         { name: 'generate-implementation-text' },
-        async () => await generateObject({
+        async () => await generateText({
           model: anthropic('claude-3-5-sonnet-latest'),
-          schema: fileChangeSchema,
           prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app.`,
           system: implementationSystemPrompt(),
           experimental_telemetry: {
@@ -126,11 +125,21 @@ Ensure that your plan prioritizes mobile-first development, emphasizes type safe
         })
       )
 
-      console.dir(implementation.changes, { depth: null })
+      const { object: changes } = await observe(
+        { name: 'generate-code-changes' },
+        async () => await generateObject({
+          model: openai('gpt-4o-mini'),
+          schema: fileChangeSchema,
+          prompt: `Generate a JSON object structured like this: ${JSON.stringify(fileChangeSchema.shape)} based on the following implementation plan: ${implementation}`,
+          system: implementationSystemPrompt(),
+        })
+      )
+
+      console.dir(changes, { depth: null })
 
       return {
         plan,
-        changes: implementation.changes
+        changes: changes.changes
       }
     },
     prompt,
