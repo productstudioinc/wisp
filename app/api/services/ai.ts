@@ -116,7 +116,7 @@ Ensure that your plan prioritizes mobile-first development, emphasizes type safe
         { name: 'generate-implementation-text' },
         async () => await generateText({
           model: anthropic('claude-3-5-sonnet-latest'),
-          prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app.`,
+          prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app. You must give the FULL file content, not just the changes.`,
           system: implementationSystemPrompt(),
           experimental_telemetry: {
             isEnabled: true
@@ -130,8 +130,22 @@ Ensure that your plan prioritizes mobile-first development, emphasizes type safe
         async () => await generateObject({
           model: openai('gpt-4o-mini'),
           schema: fileChangeSchema,
-          prompt: `Generate a JSON object structured like this: ${JSON.stringify(fileChangeSchema.shape)} based on the following implementation plan: ${implementation}`,
-          system: implementationSystemPrompt(),
+          prompt: `Generate a JSON object structured like this: 
+          
+          {
+            "changes": [
+              {
+                "path": "string",
+                "content": "string",
+                "description": "string"
+              }
+            ]
+          }
+          
+          based on the following implementation plan: ${implementation}
+          
+          You must give the FULL file content, not just the changes.
+          `,
         })
       )
 
@@ -274,7 +288,7 @@ Technical Limitations:
 CRITICAL: Must be fully responsive and mobile-first in UI. So think thoroughly about the UI/UX of the app being completely functional on mobile devices.
 IMPORTANT: Keep all new comopnents in the App.tsx file.
 IMPORTANT: You must not delete anything in the original src/index.css file, you can only add onto it or modify the color values in the @layer base section.
-IMPORTANT: You should ALWAYS change the title of the app in the src/index.html file to match the name of the app.
+IMPORTANT: You should ALWAYS change the title of the app in the index.html file to match the name of the app.
 
 Project Structure Requirements:
 1. Feature Breakdown:
