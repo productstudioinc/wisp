@@ -20,7 +20,6 @@ import { projects } from '../services/db/schema'
 import { users } from '../services/db/schema'
 import { supabase } from '../services/supabase'
 import { captureAndStoreMobileScreenshot } from '../services/screenshot'
-import { Octokit } from 'octokit'
 
 const createRequestSchema = zfd.formData({
   name: z.string(),
@@ -112,12 +111,11 @@ app.delete('/projects/:name', async (c) => {
 })
 
 app.post('/projects', async (c) => {
-  try {
-    console.log('Starting project creation...');
-    const formData = await c.req.formData()
-    const result = await createRequestSchema.parseAsync(formData)
-    console.log(`Requested project name: ${result.name}`)
+  const formData = await c.req.formData()
+  const result = await createRequestSchema.parseAsync(formData)
+  console.log(`Requested project name: ${result.name}`)
 
+  try {
     const octokit = c.get('octokit')
     const displayName = result.name
     const formattedName = result.name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
@@ -130,7 +128,8 @@ app.post('/projects', async (c) => {
         const questions = JSON.parse(result.questions)
         questionsContext = `\n\nAdditional context from questions:\n${Object.entries(questions)
           .map(([question, answer]) => `${question}: ${answer}`)
-          .join('\n')}`
+          .join('\n')
+          }`
       } catch (e) {
         console.error('Failed to parse questions:', e)
       }
@@ -164,24 +163,9 @@ Response format: Just return the concise description, nothing else.`
       private: result.private,
     })
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
-
-    console.log("Sending setup request to", baseUrl)
-
-    fetch(`${baseUrl}/api/setup-project`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        project,
-        description: result.description + questionsContext
-      })
-    }).catch(error => {
-      console.error('Failed to start background setup:', error);
+    processProjectSetup(project, octokit, availableName, result.description + questionsContext).catch(error => {
+      console.error('Background task failed:', error);
     });
-
-    console.log("Setup request sent")
 
     return c.json({
       id: project.id,
@@ -192,24 +176,7 @@ Response format: Just return the concise description, nothing else.`
     });
 
   } catch (error) {
-    console.error('Project creation failed:', error);
     handleError(error);
-  }
-})
-
-app.post('/setup-project', async (c) => {
-  console.log("Received setup request")
-
-  try {
-    const { project, description } = await c.req.json()
-    const octokit = c.get('octokit')
-
-    await processProjectSetup(project, octokit, project.name, description)
-
-    return c.json({ status: 'success' })
-  } catch (error) {
-    console.error('Project setup failed:', error)
-    return c.json({ status: 'error', message: error instanceof Error ? error.message : 'Unknown error' })
   }
 })
 
