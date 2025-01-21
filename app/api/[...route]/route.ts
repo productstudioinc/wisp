@@ -167,17 +167,11 @@ Response format: Just return the concise description, nothing else.`
     const baseUrl = process.env.VERCEL_ENV === 'development'
       ? 'http://localhost:3000'
       : `https://${process.env.VERCEL_URL}`;
-    const githubToken = process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
-
-    if (!githubToken) {
-      throw new Error('GitHub token not configured');
-    }
 
     fetch(`${baseUrl}/api/setup-project`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${githubToken}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         project,
@@ -203,13 +197,8 @@ Response format: Just return the concise description, nothing else.`
 
 app.post('/setup-project', async (c) => {
   try {
-    const authHeader = c.req.header('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      throw new HTTPException(401, { message: 'Missing or invalid authorization header' });
-    }
-    const githubToken = authHeader.substring(7);
     const { project, description } = await c.req.json()
-    const octokit = new Octokit({ auth: githubToken })
+    const octokit = c.get('octokit')
 
     await processProjectSetup(project, octokit, project.name, description)
 
