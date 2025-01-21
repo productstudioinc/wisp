@@ -164,9 +164,7 @@ Response format: Just return the concise description, nothing else.`
       private: result.private,
     })
 
-    const baseUrl = process.env.VERCEL_ENV === 'development'
-      ? 'http://localhost:3000'
-      : `https://${process.env.VERCEL_URL}`;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
 
     console.log("Sending setup request to", baseUrl)
 
