@@ -213,7 +213,7 @@ Technical Limitations:
 - Must be mobile-first and fully responsive
 
 Project Structure Requirements:
-1. Feature Breakdown:
+1. Feature Breakdown:o
    - List all core features with priority levels
    - Identify MVP (Minimum Viable Product) features
    - Plan future enhancement possibilities
@@ -289,6 +289,7 @@ CRITICAL: Must be fully responsive and mobile-first in UI. So think thoroughly a
 IMPORTANT: Keep all new comopnents in the App.tsx file.
 IMPORTANT: You must not delete anything in the original src/index.css file, you can only add onto it or modify the color values in the @layer base section.
 IMPORTANT: You should ALWAYS change the title of the app in the index.html file to match the name of the app.
+IMPORTANT: You must always keep the PWA logic and the Toaster component in the App.tsx file.
 
 Project Structure Requirements:
 1. Feature Breakdown:
