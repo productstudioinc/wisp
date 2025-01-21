@@ -20,6 +20,7 @@ import { projects } from '../services/db/schema'
 import { users } from '../services/db/schema'
 import { supabase } from '../services/supabase'
 import { captureAndStoreMobileScreenshot } from '../services/screenshot'
+import { Octokit } from 'octokit'
 
 const createRequestSchema = zfd.formData({
   name: z.string(),
@@ -111,32 +112,30 @@ app.delete('/projects/:name', async (c) => {
 })
 
 app.post('/projects', async (c) => {
-  const formData = await c.req.formData()
-  const result = await createRequestSchema.parseAsync(formData)
-  console.log(`Requested project name: ${result.name}`)
-
   try {
+    console.log('Starting project creation...');
+    const formData = await c.req.formData()
+    const result = await createRequestSchema.parseAsync(formData)
+    console.log(`Requested project name: ${result.name}`)
+
     const octokit = c.get('octokit')
     const displayName = result.name
     const formattedName = result.name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
     const availableName = await findAvailableProjectName(formattedName)
     console.log(`Using available project name: ${availableName}`)
 
-    // Parse questions if they exist
     let questionsContext = ''
     if (result.questions) {
       try {
         const questions = JSON.parse(result.questions)
         questionsContext = `\n\nAdditional context from questions:\n${Object.entries(questions)
           .map(([question, answer]) => `${question}: ${answer}`)
-          .join('\n')
-          }`
+          .join('\n')}`
       } catch (e) {
         console.error('Failed to parse questions:', e)
       }
     }
 
-    // Generate a concise description
     const conciseDescription = await generateText({
       model: anthropic('claude-3-5-sonnet-latest'),
       prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
@@ -165,8 +164,25 @@ Response format: Just return the concise description, nothing else.`
       private: result.private,
     })
 
-    processProjectSetup(project, octokit, availableName, result.description + questionsContext).catch(error => {
-      console.error('Background task failed:', error);
+    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+    const githubToken = process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
+
+    if (!githubToken) {
+      throw new Error('GitHub token not configured');
+    }
+
+    fetch(`${baseUrl}/api/setup-project`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${githubToken}`
+      },
+      body: JSON.stringify({
+        project,
+        description: result.description + questionsContext
+      })
+    }).catch(error => {
+      console.error('Failed to start background setup:', error);
     });
 
     return c.json({
@@ -178,7 +194,27 @@ Response format: Just return the concise description, nothing else.`
     });
 
   } catch (error) {
+    console.error('Project creation failed:', error);
     handleError(error);
+  }
+})
+
+app.post('/setup-project', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      throw new HTTPException(401, { message: 'Missing or invalid authorization header' });
+    }
+    const githubToken = authHeader.substring(7);
+    const { project, description } = await c.req.json()
+    const octokit = new Octokit({ auth: githubToken })
+
+    await processProjectSetup(project, octokit, project.name, description)
+
+    return c.json({ status: 'success' })
+  } catch (error) {
+    console.error('Project setup failed:', error)
+    return c.json({ status: 'error', message: error instanceof Error ? error.message : 'Unknown error' })
   }
 })
 
