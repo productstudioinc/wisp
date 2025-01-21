@@ -164,7 +164,9 @@ Response format: Just return the concise description, nothing else.`
       private: result.private,
     })
 
-    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+    const baseUrl = process.env.VERCEL_ENV === 'development'
+      ? 'http://localhost:3000'
+      : `https://${process.env.VERCEL_URL}`;
     const githubToken = process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
 
     if (!githubToken) {
