@@ -168,6 +168,8 @@ Response format: Just return the concise description, nothing else.`
       ? 'http://localhost:3000'
       : `https://${process.env.VERCEL_URL}`;
 
+    console.log("Sending setup request to", baseUrl)
+
     fetch(`${baseUrl}/api/setup-project`, {
       method: 'POST',
       headers: {
@@ -180,6 +182,8 @@ Response format: Just return the concise description, nothing else.`
     }).catch(error => {
       console.error('Failed to start background setup:', error);
     });
+
+    console.log("Setup request sent")
 
     return c.json({
       id: project.id,
@@ -196,6 +200,8 @@ Response format: Just return the concise description, nothing else.`
 })
 
 app.post('/setup-project', async (c) => {
+  console.log("Received setup request")
+
   try {
     const { project, description } = await c.req.json()
     const octokit = c.get('octokit')
