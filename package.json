@@ -21,6 +21,7 @@
     "@supabase/supabase-js": "^2.47.12",
     "@types/diff": "^7.0.0",
     "@types/micromatch": "^4.0.9",
+    "@upstash/workflow": "^0.2.4",
     "@vercel/sdk": "^1.2.2",
     "ai": "^4.0.26",
     "class-variance-authority": "^0.7.1",
