@@ -27,8 +27,8 @@ const createRequestSchema = zfd.formData({
   userId: z.string().uuid(),
   questions: z.string().optional(),
   additionalInfo: zfd.text(z.string().optional()),
-  icon: zfd.file().optional(),
-  images: zfd.repeatableOfType(zfd.file()).optional(),
+  icon: z.instanceof(Blob).optional(),
+  images: z.array(z.instanceof(Blob)).optional(),
   private: z.boolean().optional(),
 })
 
