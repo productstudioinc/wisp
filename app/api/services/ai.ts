@@ -2,7 +2,6 @@ import { z } from 'zod'
 import { generateObject, generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import type { Octokit } from '@octokit/rest'
-import { observe } from '@lmnr-ai/lmnr'
 import { anthropic } from '@ai-sdk/anthropic'
 
 const fileChangeSchema = z.object({
@@ -14,14 +13,9 @@ const fileChangeSchema = z.object({
 })
 
 export async function generateCodeChanges(prompt: string, repoContent: string) {
-  return await observe(
-    { name: 'generate-code-changes' },
-    async (prompt: string, repoContent: string) => {
-      const { text: plan } = await observe(
-        { name: 'generate-implementation-plan' },
-        async () => await generateText({
-          model: anthropic('claude-3-5-sonnet-latest'),
-          prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
+  const { text: plan } = await generateText({
+    model: anthropic('claude-3-5-sonnet-latest'),
+    prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
 
 First, review the content of the template repository:
 
@@ -106,59 +100,48 @@ Implementation Steps:
 Let's implement!"
 
 Ensure that your plan prioritizes mobile-first development, emphasizes type safety, and provides a comprehensive approach to building a high-quality PWA.`,
-          experimental_telemetry: {
-            isEnabled: true
-          }
-        })
-      )
+    experimental_telemetry: {
+      isEnabled: true
+    }
+  })
 
-      const { text: implementation } = await observe(
-        { name: 'generate-implementation-text' },
-        async () => await generateText({
-          model: anthropic('claude-3-5-sonnet-latest'),
-          prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app. You must give the FULL file content, not just the changes.`,
-          system: implementationSystemPrompt(),
-          experimental_telemetry: {
-            isEnabled: true
-          },
-          maxRetries: 3
-        })
-      )
-
-      const { object: changes } = await observe(
-        { name: 'generate-code-changes' },
-        async () => await generateObject({
-          model: openai('gpt-4o-mini'),
-          schema: fileChangeSchema,
-          prompt: `Generate a JSON object structured like this: 
-          
-          {
-            "changes": [
-              {
-                "path": "string",
-                "content": "string",
-                "description": "string"
-              }
-            ]
-          }
-          
-          based on the following implementation plan: ${implementation}
-          
-          You must give the FULL file content, not just the changes.
-          `,
-        })
-      )
-
-      console.dir(changes, { depth: null })
-
-      return {
-        plan,
-        changes: changes.changes
-      }
+  const { text: implementation } = await generateText({
+    model: anthropic('claude-3-5-sonnet-latest'),
+    prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app. You must give the FULL file content, not just the changes.`,
+    system: implementationSystemPrompt(),
+    experimental_telemetry: {
+      isEnabled: true
     },
-    prompt,
-    repoContent
-  )
+    maxRetries: 3
+  })
+
+  const { object: changes } = await generateObject({
+    model: openai('gpt-4o-mini'),
+    schema: fileChangeSchema,
+    prompt: `Generate a JSON object structured like this: 
+    
+    {
+      "changes": [
+        {
+          "path": "string",
+          "content": "string",
+          "description": "string"
+        }
+      ]
+    }
+    
+    based on the following implementation plan: ${implementation}
+    
+    You must give the FULL file content, not just the changes.
+    `,
+  })
+
+  console.dir(changes, { depth: null })
+
+  return {
+    plan,
+    changes: changes.changes
+  }
 }
 
 export async function applyChangesToFiles(
@@ -179,26 +162,19 @@ export async function applyChangesToFiles(
 }
 
 export async function generateDeploymentErrorFix(repoContent: string, error: string) {
-  return await observe(
-    { name: 'generate-deployment-error-fix' },
-    async (repoContent: string, error: string) => {
-      console.log('Generating deployment error fix')
-      const { object: implementation } = await generateObject({
-        model: anthropic('claude-3-5-sonnet-latest'),
-        schema: fileChangeSchema,
-        system: implementationSystemPrompt(),
-        prompt: `Fix the following deployment error in this repository:\n\nError: ${error}\n\nRepository content:\n${repoContent}\n\n
+  console.log('Generating deployment error fix')
+  const { object: implementation } = await generateObject({
+    model: anthropic('claude-3-5-sonnet-latest'),
+    schema: fileChangeSchema,
+    system: implementationSystemPrompt(),
+    prompt: `Fix the following deployment error in this repository:\n\nError: ${error}\n\nRepository content:\n${repoContent}\n\n
 Generate the necessary fixes to resolve this deployment error. Focus ONLY on changes that would fix the error.
 Be precise and minimal in your changes. Do not add features or make unrelated modifications.
 
 Only include files that need to be modified to fix the error.`,
-      })
+  })
 
-      return implementation
-    },
-    repoContent,
-    error
-  )
+  return implementation
 }
 
 const systemPrompt = () => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
