@@ -1,8 +1,8 @@
-import { withContentCollections } from "@content-collections/next";
+import { withContentCollections } from '@content-collections/next'
 import type { NextConfig } from 'next'
 
-const nextConfig: NextConfig = {
-  reactStrictMode: true,
-}
+const nextConfig = {
+	reactStrictMode: true,
+} satisfies Partial<NextConfig>
 
-export default withContentCollections(nextConfig);
+export default withContentCollections(nextConfig)
