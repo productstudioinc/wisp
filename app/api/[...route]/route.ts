@@ -20,21 +20,22 @@ import { projects } from '../services/db/schema'
 import { users } from '../services/db/schema'
 import { supabase } from '../services/supabase'
 import { captureAndStoreMobileScreenshot } from '../services/screenshot'
+import { deepseek } from '@ai-sdk/deepseek'
 
 const createRequestSchema = zfd.formData({
-  name: z.string(),
-  description: z.string(),
-  userId: z.string().uuid(),
-  questions: z.string().optional(),
-  additionalInfo: zfd.text(z.string().optional()),
-  icon: z.instanceof(Blob).optional(),
-  images: z.array(z.instanceof(Blob)).optional(),
-  private: z.boolean().optional(),
+	name: z.string(),
+	description: z.string(),
+	userId: z.string().uuid(),
+	questions: z.string().optional(),
+	additionalInfo: zfd.text(z.string().optional()),
+	icon: z.instanceof(Blob).optional(),
+	images: z.array(z.instanceof(Blob)).optional(),
+	private: z.boolean().optional(),
 })
 
 const refineRequestSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().min(1),
+	name: z.string().min(1),
+	description: z.string().min(1),
 })
 
 const app = new Hono<{ Variables: Variables }>().basePath('/api')
@@ -42,102 +43,102 @@ const app = new Hono<{ Variables: Variables }>().basePath('/api')
 app.use('*', withGithubAuth)
 
 function handleError(error: unknown) {
-  console.error('Error details:', error instanceof ProjectError ? error.toString() : error);
+	console.error('Error details:', error instanceof ProjectError ? error.toString() : error);
 
-  if (error instanceof ProjectError) {
-    const status = error.code === 'PROJECT_EXISTS' ? 409 :
-      error.code === 'PROJECT_NOT_FOUND' ? 404 :
-        error.code === 'USER_NOT_FOUND' ? 404 : 500;
+	if (error instanceof ProjectError) {
+		const status = error.code === 'PROJECT_EXISTS' ? 409 :
+			error.code === 'PROJECT_NOT_FOUND' ? 404 :
+				error.code === 'USER_NOT_FOUND' ? 404 : 500;
 
-    throw new HTTPException(status, {
-      message: error.message,
-    });
-  }
+		throw new HTTPException(status, {
+			message: error.message,
+		});
+	}
 
-  if (error instanceof Error) {
-    throw new HTTPException(500, {
-      message: error.message,
-    });
-  }
+	if (error instanceof Error) {
+		throw new HTTPException(500, {
+			message: error.message,
+		});
+	}
 
-  throw new HTTPException(500, {
-    message: 'An unknown error occurred',
-  });
+	throw new HTTPException(500, {
+		message: 'An unknown error occurred',
+	});
 }
 
 app.delete('/projects/:name', async (c) => {
-  const projectName = c.req.param('name')
-  console.log(`Deleting project: ${projectName}`)
+	const projectName = c.req.param('name')
+	console.log(`Deleting project: ${projectName}`)
 
-  const body = await z.object({
-    userId: z.string().uuid()
-  }).parseAsync(await c.req.json())
-    .catch(() => {
-      throw new HTTPException(400, {
-        message: 'Invalid request body: userId is required',
-      });
-    });
+	const body = await z.object({
+		userId: z.string().uuid()
+	}).parseAsync(await c.req.json())
+		.catch(() => {
+			throw new HTTPException(400, {
+				message: 'Invalid request body: userId is required',
+			});
+		});
 
-  try {
-    const octokit = c.get('octokit')
-    const project = await getProjectByName(projectName);
+	try {
+		const octokit = c.get('octokit')
+		const project = await getProjectByName(projectName);
 
-    if (project.userId !== body.userId) {
-      throw new HTTPException(403, {
-        message: 'Unauthorized: Project does not belong to the user',
-      });
-    }
+		if (project.userId !== body.userId) {
+			throw new HTTPException(403, {
+				message: 'Unauthorized: Project does not belong to the user',
+			});
+		}
 
-    await Promise.all([
-      deleteRepository(octokit, 'productstudioinc', projectName),
-      project.dnsRecordId ? deleteDomainRecord(project.dnsRecordId) : Promise.resolve(),
-      project.vercelProjectId ? deleteVercelProject(project.vercelProjectId) : Promise.resolve(),
-      supabase.storage
-        .from('project-screenshots')
-        .remove([`${project.userId}/${project.id}/screenshot.jpg`])
-        .catch(error => console.error('Failed to delete screenshot:', error)),
-    ]);
+		await Promise.all([
+			deleteRepository(octokit, 'productstudioinc', projectName),
+			project.dnsRecordId ? deleteDomainRecord(project.dnsRecordId) : Promise.resolve(),
+			project.vercelProjectId ? deleteVercelProject(project.vercelProjectId) : Promise.resolve(),
+			supabase.storage
+				.from('project-screenshots')
+				.remove([`${project.userId}/${project.id}/screenshot.jpg`])
+				.catch(error => console.error('Failed to delete screenshot:', error)),
+		]);
 
-    await db.delete(projects).where(eq(projects.id, project.id));
-    console.log(`Successfully deleted project ${projectName} and associated resources`);
+		await db.delete(projects).where(eq(projects.id, project.id));
+		console.log(`Successfully deleted project ${projectName} and associated resources`);
 
-    return c.json({
-      status: 'success',
-      message: 'Repository, domain record, project and screenshot deleted successfully'
-    })
-  } catch (error) {
-    handleError(error);
-  }
+		return c.json({
+			status: 'success',
+			message: 'Repository, domain record, project and screenshot deleted successfully'
+		})
+	} catch (error) {
+		handleError(error);
+	}
 })
 
 app.post('/projects', async (c) => {
-  const formData = await c.req.formData()
-  const result = await createRequestSchema.parseAsync(formData)
-  console.log(`Requested project name: ${result.name}`)
+	const formData = await c.req.formData()
+	const result = await createRequestSchema.parseAsync(formData)
+	console.log(`Requested project name: ${result.name}`)
 
-  try {
-    const octokit = c.get('octokit')
-    const displayName = result.name
-    const formattedName = result.name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-    const availableName = await findAvailableProjectName(formattedName)
-    console.log(`Using available project name: ${availableName}`)
+	try {
+		const octokit = c.get('octokit')
+		const displayName = result.name
+		const formattedName = result.name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+		const availableName = await findAvailableProjectName(formattedName)
+		console.log(`Using available project name: ${availableName}`)
 
-    let questionsContext = ''
-    if (result.questions) {
-      try {
-        const questions = JSON.parse(result.questions)
-        questionsContext = `\n\nAdditional context from questions:\n${Object.entries(questions)
-          .map(([question, answer]) => `${question}: ${answer}`)
-          .join('\n')
-          }`
-      } catch (e) {
-        console.error('Failed to parse questions:', e)
-      }
-    }
+		let questionsContext = ''
+		if (result.questions) {
+			try {
+				const questions = JSON.parse(result.questions)
+				questionsContext = `\n\nAdditional context from questions:\n${Object.entries(questions)
+					.map(([question, answer]) => `${question}: ${answer}`)
+					.join('\n')
+					}`
+			} catch (e) {
+				console.error('Failed to parse questions:', e)
+			}
+		}
 
-    const conciseDescription = await generateText({
-      model: anthropic('claude-3-5-sonnet-latest'),
-      prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
+		const conciseDescription = await generateText({
+			model: deepseek('deepseek-chat'),
+			prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
 
 Description: ${result.description}${questionsContext}
 
@@ -152,109 +153,109 @@ Questions: Preferred workout type: Weightlifting, Goal: Build muscle mass
 Output: A weightlifting tracker focused on muscle-building progress
 
 Response format: Just return the concise description, nothing else.`
-    });
+		});
 
-    const project = await createProject({
-      userId: result.userId,
-      name: availableName,
-      description: conciseDescription.text,
-      displayName: displayName,
-      projectId: '',
-      private: result.private,
-    })
+		const project = await createProject({
+			userId: result.userId,
+			name: availableName,
+			description: conciseDescription.text,
+			displayName: displayName,
+			projectId: '',
+			private: result.private,
+		})
 
-    processProjectSetup(project, octokit, availableName, result.description + questionsContext).catch(error => {
-      console.error('Background task failed:', error);
-    });
+		processProjectSetup(project, octokit, availableName, result.description + questionsContext).catch(error => {
+			console.error('Background task failed:', error);
+		});
 
-    return c.json({
-      id: project.id,
-      name: availableName,
-      displayName: result.name,
-      status: 'creating',
-      message: 'Project creation started'
-    });
+		return c.json({
+			id: project.id,
+			name: availableName,
+			displayName: result.name,
+			status: 'creating',
+			message: 'Project creation started'
+		});
 
-  } catch (error) {
-    handleError(error);
-  }
+	} catch (error) {
+		handleError(error);
+	}
 })
 
 async function processProjectSetup(
-  project: { id: string },
-  octokit: any,
-  name: string,
-  description: string
+	project: { id: string },
+	octokit: any,
+	name: string,
+	description: string
 ) {
-  try {
-    const { projectId: vercelProjectId, dnsRecordId, customDomain } = await setupRepository(octokit, name, description);
+	try {
+		const { projectId: vercelProjectId, dnsRecordId, customDomain } = await setupRepository(octokit, name, description);
 
-    const projectDetails = await getProject(project.id);
+		const projectDetails = await getProject(project.id);
 
-    await updateProjectDetails({
-      projectId: project.id,
-      vercelProjectId,
-      dnsRecordId,
-      customDomain
-    });
+		await updateProjectDetails({
+			projectId: project.id,
+			vercelProjectId,
+			dnsRecordId,
+			customDomain
+		});
 
-    await updateProjectStatus({
-      projectId: project.id,
-      status: 'creating',
-      message: 'Repository setup complete'
-    });
+		await updateProjectStatus({
+			projectId: project.id,
+			status: 'creating',
+			message: 'Repository setup complete'
+		});
 
-    const isVerified = await checkDomainStatus(vercelProjectId, name);
-    if (!isVerified) {
-      throw new Error('Domain verification failed');
-    }
+		const isVerified = await checkDomainStatus(vercelProjectId, name);
+		if (!isVerified) {
+			throw new Error('Domain verification failed');
+		}
 
-    const deploymentSuccess = await handleDeploymentWithRetries(
-      vercelProjectId,
-      octokit,
-      name,
-      `https://github.com/productstudioinc/${name}`
-    );
+		const deploymentSuccess = await handleDeploymentWithRetries(
+			vercelProjectId,
+			octokit,
+			name,
+			`https://github.com/productstudioinc/${name}`
+		);
 
-    if (!deploymentSuccess) {
-      throw new Error('Deployment failed');
-    }
+		if (!deploymentSuccess) {
+			throw new Error('Deployment failed');
+		}
 
-    try {
-      const screenshotUrl = await captureAndStoreMobileScreenshot(
-        project.id,
-        projectDetails.userId,
-        `https://${name}.usewisp.app`
-      );
-      await updateMobileScreenshot(project.id, screenshotUrl);
-    } catch (screenshotError) {
-      console.error('Failed to capture screenshot:', screenshotError);
-    }
+		try {
+			const screenshotUrl = await captureAndStoreMobileScreenshot(
+				project.id,
+				projectDetails.userId,
+				`https://${name}.usewisp.app`
+			);
+			await updateMobileScreenshot(project.id, screenshotUrl);
+		} catch (screenshotError) {
+			console.error('Failed to capture screenshot:', screenshotError);
+		}
 
-    await updateProjectStatus({
-      projectId: project.id,
-      status: 'deployed',
-      message: 'Project successfully deployed',
-      deployedAt: new Date()
-    });
+		await updateProjectStatus({
+			projectId: project.id,
+			status: 'deployed',
+			message: 'Project successfully deployed',
+			deployedAt: new Date()
+		});
 
-    console.log(`Project ${name} successfully created and deployed`);
-  } catch (error) {
-    await updateProjectStatus({
-      projectId: project.id,
-      status: 'failed',
-      message: error instanceof Error ? error.message : 'Unknown error occurred',
-      error: error instanceof Error ? error.toString() : String(error)
-    });
-    console.error('Background task failed:', error);
-  }
+		console.log(`Project ${name} successfully created and deployed`);
+	} catch (error) {
+		await updateProjectStatus({
+			projectId: project.id,
+			status: 'failed',
+			message: error instanceof Error ? error.message : 'Unknown error occurred',
+			error: error instanceof Error ? error.toString() : String(error)
+		});
+		console.error('Background task failed:', error);
+	}
 }
 
 app.post('/refine', async c => {
-  const body = await refineRequestSchema.parseAsync(await c.req.json())
-  const result = await generateText({
-    model: anthropic('claude-3-5-sonnet-latest'),
-    prompt: `You are an AI assistant specialized in product development, particularly in helping users generate ideas for personalized apps. Your task is to analyze an app concept and provide tailored questions and image suggestions to help refine the app idea.
+	const body = await refineRequestSchema.parseAsync(await c.req.json())
+	const result = await generateText({
+		model: deepseek('deepseek-chat'),
+		prompt: `You are an AI assistant specialized in product development, particularly in helping users generate ideas for personalized apps. Your task is to analyze an app concept and provide tailored questions and image suggestions to help refine the app idea.
 
 Here's the app concept you need to work with:
 
@@ -291,63 +292,63 @@ Image Suggestions: [A single string of suggestions for types of images to upload
 </output>
 
 Remember, the questions should be designed to gather information that will help personalize the app without being so specific that they limit the app's potential or make it impossible to generate. The image suggestions should be general enough to apply to various users while still being relevant to the app concept.`,
-  })
+	})
 
-  console.log(result.text)
+	console.log(result.text)
 
-  const { object } = await generateObject({
-    model: groq('llama-3.1-8b-instant'),
-    schema: z.object({
-      questions: z.string().array(),
-      imageSuggestions: z.string()
-    }),
-    prompt: `From this analysis, generate a JSON object with the questions and image suggestions for my app. Do not modify or include any other text.
+	const { object } = await generateObject({
+		model: groq('llama-3.1-8b-instant'),
+		schema: z.object({
+			questions: z.string().array(),
+			imageSuggestions: z.string()
+		}),
+		prompt: `From this analysis, generate a JSON object with the questions and image suggestions for my app. Do not modify or include any other text.
 
     Analysis: ${result.text}
     `
-  })
+	})
 
-  console.log(object)
+	console.log(object)
 
-  return c.json(object)
+	return c.json(object)
 })
 
 app.delete('/users/:id', async (c) => {
-  const userId = c.req.param('id')
-  console.log(`Deleting user: ${userId}`)
+	const userId = c.req.param('id')
+	console.log(`Deleting user: ${userId}`)
 
-  try {
-    const userProjects = await getUserProjects(userId)
+	try {
+		const userProjects = await getUserProjects(userId)
 
-    await Promise.all(userProjects.map(async (project) => {
-      if (project.vercelProjectId && project.dnsRecordId && project.name) {
-        await Promise.all([
-          deleteRepository(c.get('octokit'), 'productstudioinc', project.name),
-          deleteDomainRecord(project.dnsRecordId),
-          deleteVercelProject(project.vercelProjectId)
-        ]);
-      }
-    }));
+		await Promise.all(userProjects.map(async (project) => {
+			if (project.vercelProjectId && project.dnsRecordId && project.name) {
+				await Promise.all([
+					deleteRepository(c.get('octokit'), 'productstudioinc', project.name),
+					deleteDomainRecord(project.dnsRecordId),
+					deleteVercelProject(project.vercelProjectId)
+				]);
+			}
+		}));
 
-    await db.delete(projects).where(eq(projects.userId, userId));
+		await db.delete(projects).where(eq(projects.userId, userId));
 
-    await db.delete(users).where(eq(users.id, userId));
+		await db.delete(users).where(eq(users.id, userId));
 
-    const { error } = await supabase.auth.admin.deleteUser(userId)
+		const { error } = await supabase.auth.admin.deleteUser(userId)
 
-    if (error) {
-      throw new Error('Failed to delete user from Supabase');
-    }
+		if (error) {
+			throw new Error('Failed to delete user from Supabase');
+		}
 
-    console.log('User deleted from Supabase')
+		console.log('User deleted from Supabase')
 
-    return c.json({
-      status: 'success',
-      message: 'User and all associated projects deleted successfully'
-    })
-  } catch (error) {
-    handleError(error);
-  }
+		return c.json({
+			status: 'success',
+			message: 'User and all associated projects deleted successfully'
+		})
+	} catch (error) {
+		handleError(error);
+	}
 })
 
 export const POST = handle(app)

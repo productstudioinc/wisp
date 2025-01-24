@@ -3,6 +3,7 @@ import { generateObject, generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import type { Octokit } from '@octokit/rest'
 import { anthropic } from '@ai-sdk/anthropic'
+import { deepseek } from '@ai-sdk/deepseek'
 
 const fileChangeSchema = z.object({
   changes: z.array(z.object({
@@ -14,7 +15,7 @@ const fileChangeSchema = z.object({
 
 export async function generateCodeChanges(prompt: string, repoContent: string) {
   const { text: plan } = await generateText({
-    model: anthropic('claude-3-5-sonnet-latest'),
+    model: deepseek('deepseek-chat'),
     prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
 
 First, review the content of the template repository:
@@ -106,7 +107,7 @@ Ensure that your plan prioritizes mobile-first development, emphasizes type safe
   })
 
   const { text: implementation } = await generateText({
-    model: anthropic('claude-3-5-sonnet-latest'),
+    model: deepseek('deepseek-chat'),
     prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app. You must give the FULL file content, not just the changes.`,
     system: implementationSystemPrompt(),
     experimental_telemetry: {
@@ -164,7 +165,7 @@ export async function applyChangesToFiles(
 export async function generateDeploymentErrorFix(repoContent: string, error: string) {
   console.log('Generating deployment error fix')
   const { object: implementation } = await generateObject({
-    model: anthropic('claude-3-5-sonnet-latest'),
+    model: deepseek('deepseek-chat'),
     schema: fileChangeSchema,
     system: implementationSystemPrompt(),
     prompt: `Fix the following deployment error in this repository:\n\nError: ${error}\n\nRepository content:\n${repoContent}\n\n
