@@ -105,6 +105,9 @@ Ensure that your plan prioritizes mobile-first development, emphasizes type safe
     }
   })
 
+  // wait 2 seconds
+  await new Promise(resolve => setTimeout(resolve, 2000))
+
   const { text: implementation } = await generateText({
     model: anthropic('claude-3-5-sonnet-latest'),
     prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app. You must give the FULL file content, not just the changes.`,
@@ -114,6 +117,9 @@ Ensure that your plan prioritizes mobile-first development, emphasizes type safe
     },
     maxRetries: 3
   })
+
+  // wait 2 seconds
+  await new Promise(resolve => setTimeout(resolve, 2000))
 
   const { object: changes } = await generateObject({
     model: openai('gpt-4o-mini'),
