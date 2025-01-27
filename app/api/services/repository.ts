@@ -51,7 +51,7 @@ async function handleAIChanges(
   repoUrl: string,
   prompt: string
 ): Promise<void> {
-  const { tree, files } = await getContent(octokit, repoUrl)
+  const { tree, files } = await getContent(octokit)
   const repoContent = `Directory structure:\n${tree}\n\nFiles:\n${files.map(
     (f: { path: string; content: string }) => `\n--- ${f.path} ---\n${f.content}`
   ).join('\n')}`

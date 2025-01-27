@@ -6,7 +6,17 @@ import { parsePatch, applyPatch } from 'diff'
 import octokit from '@/lib/services/github'
 
 function shouldIgnorePath(path: string): boolean {
-  return micromatch.isMatch(path, DEFAULT_IGNORE_PATTERNS, { dot: true })
+  const allowedFiles = ['index.html', 'package.json', 'vite.config.ts']
+
+  if (path.startsWith('src/')) {
+    return false
+  }
+
+  if (allowedFiles.includes(path)) {
+    return false
+  }
+
+  return true
 }
 
 function generateTreeString(tree: TreeItem[], prefix = ''): string {
@@ -77,47 +87,44 @@ export async function fetchFileContent(octokit: Octokit, owner: string, repo: st
   throw new Error('Not a file')
 }
 
-export async function getContent(octokit: Octokit, url: string): Promise<GithubContent> {
+export async function getContent(url: string): Promise<string> {
   const urlParts = url.replace('https://github.com/', '').split('/')
   const owner = urlParts[0]
   const repo = urlParts[1]
   const path = urlParts.slice(2).join('/')
 
-  try {
-    const tree = await fetchGithubTree(octokit, owner, repo, path)
-    const treeString = generateTreeString([{
-      type: 'dir',
-      name: `${repo}/`,
-      path: '',
-      children: tree
-    }])
+  const tree = await fetchGithubTree(octokit, owner, repo, path)
+  const treeString = generateTreeString([{
+    type: 'dir',
+    name: `${repo}/`,
+    path: '',
+    children: tree
+  }])
 
-    const files: { path: string, content: string }[] = []
+  const files: { path: string, content: string }[] = []
 
-    async function collectFiles(items: TreeItem[]) {
-      for (const item of items) {
-        if (item.type === 'file' && !shouldIgnorePath(item.path)) {
-          const content = await fetchFileContent(octokit, owner, repo, item.path)
-          files.push({
-            path: item.path,
-            content
-          })
-        }
-        if (item.children) {
-          await collectFiles(item.children)
-        }
+  async function collectFiles(items: TreeItem[]) {
+    for (const item of items) {
+      if (item.type === 'file' && !shouldIgnorePath(item.path)) {
+        const content = await fetchFileContent(octokit, owner, repo, item.path)
+        files.push({
+          path: item.path,
+          content
+        })
+      }
+      if (item.children) {
+        await collectFiles(item.children)
       }
     }
-
-    await collectFiles(tree)
-
-    return {
-      tree: treeString,
-      files
-    }
-  } catch (error: any) {
-    throw new Error(`Failed to fetch GitHub content: ${error.message}`)
   }
+
+  await collectFiles(tree)
+  const repoContent = `Directory structure:\n${treeString}\n\nFiles:\n${files.map(
+    (f: { path: string; content: string }) => `\n--- ${f.path} ---\n${f.content}`
+  ).join('\n')}`
+
+  return repoContent
+
 }
 
 export async function createFromTemplate(templateOwner: string, templateRepo: string, newRepoName: string): Promise<string> {

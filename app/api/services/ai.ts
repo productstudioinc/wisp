@@ -4,7 +4,7 @@ import { openai } from '@ai-sdk/openai'
 import type { Octokit } from '@octokit/rest'
 import { anthropic } from '@ai-sdk/anthropic'
 
-const fileChangeSchema = z.object({
+export const fileChangeSchema = z.object({
   changes: z.array(z.object({
     path: z.string().describe('The path to the file relative to the repository root'),
     content: z.string().describe('The complete content that should be in this file'),
@@ -257,7 +257,7 @@ Tech Stack: React + Vite, LocalStorage for caching, Geolocation API
 Let's implement!"
 </chain_of_thought_instructions>`
 
-const implementationSystemPrompt = () => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
+export const implementationSystemPrompt = () => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
 
 <system_constraints>
 You will be given a template repository that's setup with React and Vite-PWA.
