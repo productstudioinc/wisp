@@ -1,6 +1,7 @@
 import { eq, like } from 'drizzle-orm';
 import { db } from './index';
 import { projects, type projectStatus, users } from './schema';
+import { NonRetriableError } from 'inngest';
 
 export type ProjectStatus = typeof projectStatus.enumValues[number];
 
@@ -76,7 +77,7 @@ function createError(
   return new ProjectError(message, code, { operation, details }, originalError);
 }
 
-export async function createProject({
+export async function createProjectInDatabase({
   userId,
   name,
   description,
@@ -95,54 +96,37 @@ export async function createProject({
   customDomain?: string;
   private?: boolean;
 }) {
-  try {
-    const existingProject = await db.select()
-      .from(projects)
-      .where(eq(projects.name, name))
-      .limit(1);
+  const existingProject = await db.select()
+    .from(projects)
+    .where(eq(projects.name, name))
+    .limit(1);
 
-    if (existingProject.length > 0) {
-      throw createError(
-        'PROJECT_EXISTS',
-        `Project with name "${name}" already exists`,
-        'createProject',
-        { name, userId }
-      );
-    }
-
-    const project = await db.insert(projects).values({
-      id: crypto.randomUUID(),
-      userId,
-      name,
-      description,
-      displayName,
-      vercelProjectId: projectId,
-      dnsRecordId,
-      customDomain,
-      private: isPrivate,
-      status: 'creating',
-      statusMessage: 'Project creation started',
-      lastUpdated: new Date(),
-      createdAt: new Date(),
-    }).returning();
-
-    return project[0];
-  } catch (error) {
-    if (error instanceof ProjectError) throw error;
-
+  if (existingProject.length > 0) {
     throw createError(
-      'CREATE_FAILED',
-      'Failed to create project in database',
+      'PROJECT_EXISTS',
+      `Project with name "${name}" already exists`,
       'createProject',
-      {
-        name,
-        userId,
-        projectId,
-        attemptedOperation: 'database_insert',
-      },
-      error
+      { name, userId }
     );
   }
+
+  const project = await db.insert(projects).values({
+    id: crypto.randomUUID(),
+    userId,
+    name,
+    description,
+    displayName,
+    vercelProjectId: projectId,
+    dnsRecordId,
+    customDomain,
+    private: isPrivate,
+    status: 'creating',
+    statusMessage: 'Project creation started',
+    lastUpdated: new Date(),
+    createdAt: new Date(),
+  }).returning();
+
+  return project[0];
 }
 
 export async function updateProjectStatus({
@@ -463,4 +447,13 @@ export async function findAvailableProjectName(baseName: string): Promise<string
 
   const maxNumber = Math.max(0, ...numbers);
   return `${baseName}-${maxNumber + 1}`;
+}
+
+export async function checkIfUserExists(userId: string) {
+  try {
+    const user = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    return user.length > 0;
+  } catch (error) {
+    throw new NonRetriableError("User does not exist")
+  }
 }

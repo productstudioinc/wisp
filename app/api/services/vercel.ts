@@ -1,6 +1,6 @@
 import { Vercel } from '@vercel/sdk'
 
-const vercel = new Vercel({
+export const vercel = new Vercel({
   bearerToken: process.env.VERCEL_BEARER_TOKEN
 })
 

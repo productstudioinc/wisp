@@ -3,6 +3,7 @@ import type { TreeItem, GithubContent } from '../types'
 import { DEFAULT_IGNORE_PATTERNS } from '../constants'
 import type { Octokit } from '@octokit/rest'
 import { parsePatch, applyPatch } from 'diff'
+import octokit from '@/lib/services/github'
 
 function shouldIgnorePath(path: string): boolean {
   return micromatch.isMatch(path, DEFAULT_IGNORE_PATTERNS, { dot: true })
@@ -119,39 +120,30 @@ export async function getContent(octokit: Octokit, url: string): Promise<GithubC
   }
 }
 
-export async function createFromTemplate(octokit: Octokit, templateOwner: string, templateRepo: string, newRepoName: string): Promise<string> {
-  try {
-    try {
-      await octokit.rest.repos.get({
-        owner: 'productstudioinc',
-        repo: newRepoName,
-      });
+export async function createFromTemplate(templateOwner: string, templateRepo: string, newRepoName: string): Promise<string> {
+  await octokit.rest.repos.get({
+    owner: 'productstudioinc',
+    repo: newRepoName,
+  });
 
-      await octokit.rest.repos.delete({
-        owner: 'productstudioinc',
-        repo: newRepoName,
-      });
+  await octokit.rest.repos.delete({
+    owner: 'productstudioinc',
+    repo: newRepoName,
+  });
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    } catch (error: any) {
-      if (error.status !== 404) {
-        throw error;
-      }
-    }
+  await new Promise(resolve => setTimeout(resolve, 2000));
 
-    await octokit.rest.repos.createUsingTemplate({
-      template_owner: templateOwner,
-      template_repo: templateRepo,
-      owner: 'productstudioinc',
-      name: newRepoName,
-      private: false,
-      include_all_branches: false
-    })
 
-    return `https://github.com/productstudioinc/${newRepoName}`
-  } catch (error: any) {
-    throw new Error(`Failed to create repository from template: ${error.message}`)
-  }
+  await octokit.rest.repos.createUsingTemplate({
+    template_owner: templateOwner,
+    template_repo: templateRepo,
+    owner: 'productstudioinc',
+    name: newRepoName,
+    private: false,
+    include_all_branches: false
+  })
+
+  return `https://github.com/productstudioinc/${newRepoName}`
 }
 
 export async function createCommit(

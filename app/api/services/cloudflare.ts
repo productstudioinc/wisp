@@ -1,10 +1,10 @@
 import Cloudflare from 'cloudflare'
 
-const client = new Cloudflare()
+export const cloudflareClient = new Cloudflare()
 
 export async function createDomainRecord(domainPrefix: string) {
   try {
-    const result = await client.dns.records.create({
+    const result = await cloudflareClient.dns.records.create({
       type: 'CNAME',
       name: domainPrefix,
       zone_id: process.env.CLOUDFLARE_ZONE_ID as string,
@@ -20,7 +20,7 @@ export async function createDomainRecord(domainPrefix: string) {
 
 export async function deleteDomainRecord(dnsRecordId: string) {
   try {
-    await client.dns.records.delete(dnsRecordId, {
+    await cloudflareClient.dns.records.delete(dnsRecordId, {
       zone_id: process.env.CLOUDFLARE_ZONE_ID as string,
     })
   } catch (error) {
