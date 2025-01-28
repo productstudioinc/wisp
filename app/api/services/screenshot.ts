@@ -20,54 +20,49 @@ export async function captureAndStoreMobileScreenshot(
     bypassCSP: true,
   });
 
-  try {
-    const page = await context.newPage();
+  const page = await context.newPage();
 
-    await page.addInitScript(() => {
-      Object.defineProperty(window.navigator, 'standalone', {
-        get: () => true,
-      });
-      window.matchMedia = (query: string): MediaQueryList => ({
-        matches: query === '(display-mode: standalone)',
-        media: query,
-        onchange: null,
-        addListener: () => { },
-        removeListener: () => { },
-        addEventListener: () => { },
-        removeEventListener: () => { },
-        dispatchEvent: () => true
-      });
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'standalone', {
+      get: () => true,
+    });
+    window.matchMedia = (query: string): MediaQueryList => ({
+      matches: query === '(display-mode: standalone)',
+      media: query,
+      onchange: null,
+      addListener: () => { },
+      removeListener: () => { },
+      addEventListener: () => { },
+      removeEventListener: () => { },
+      dispatchEvent: () => true
+    });
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 5000))
+
+  console.log('Taking screenshot of:', url)
+  await page.goto(url, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2000);
+
+  const screenshot = await page.screenshot({
+    type: 'jpeg',
+    quality: 80,
+    fullPage: false
+  });
+
+  const fileName = `${userId}/${projectId}/screenshot.jpg`;
+  const { error } = await supabase.storage
+    .from('project-screenshots')
+    .upload(fileName, screenshot, {
+      contentType: 'image/jpeg',
+      upsert: true
     });
 
-    console.log('Waiting 5 seconds for deployment to stabilize...')
-    await new Promise(resolve => setTimeout(resolve, 5000))
+  if (error) throw error;
 
-    console.log('Taking screenshot of:', url)
-    await page.goto(url, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(2000);
+  const { data: { publicUrl } } = supabase.storage
+    .from('project-screenshots')
+    .getPublicUrl(fileName);
 
-    const screenshot = await page.screenshot({
-      type: 'jpeg',
-      quality: 80,
-      fullPage: false
-    });
-
-    const fileName = `${userId}/${projectId}/screenshot.jpg`;
-    const { error } = await supabase.storage
-      .from('project-screenshots')
-      .upload(fileName, screenshot, {
-        contentType: 'image/jpeg',
-        upsert: true
-      });
-
-    if (error) throw error;
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('project-screenshots')
-      .getPublicUrl(fileName);
-
-    return publicUrl;
-  } finally {
-    await browser.close();
-  }
+  return publicUrl;
 } 

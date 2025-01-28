@@ -2,6 +2,7 @@ import {
   checkIfUserExists,
   createProjectInDatabase,
   findAvailableProjectName,
+  updateMobileScreenshot,
   updateProjectStatus,
 } from '@/app/api/services/db/queries'
 import { inngest } from './client'
@@ -12,11 +13,12 @@ import {
 import { anthropic } from '@ai-sdk/anthropic'
 import { RetryAfterError } from 'inngest'
 import octokit, { createCommitFromDiff } from '../services/github'
-import { vercel } from '@/app/api/services/vercel'
+import { checkDomainStatus, vercel } from '@/app/api/services/vercel'
 import { cloudflareClient } from '@/app/api/services/cloudflare'
 import { getContent } from '@/app/api/services/github'
 import { groq } from '@ai-sdk/groq'
 import { parsePatch, applyPatch } from 'diff'
+import { captureAndStoreMobileScreenshot } from '@/app/api/services/screenshot'
 
 export const createProject = inngest.createFunction(
   {
@@ -261,12 +263,14 @@ ${githubContent.replace(/^---/gm, '###')}
 
 Requirements:
 1. Keep all components in App.tsx
-2. Maintain PWA and Toaster logic
+2. Keep the PWA logic in the App.tsx
 3. Use mobile-first design with Tailwind
 4. Ensure type safety
 5. Use only existing dependencies
 6. Include complete file contents
 7. Keep all original tailwind variables and classes in src/index.css
+
+CRITICAL: You MUST keep the isPWA and Toaster logic in the App.tsx
 
 When generating diffs for React components:
 1. Always include the full JSX context (parent elements)
@@ -275,7 +279,7 @@ When generating diffs for React components:
 4. Include imports at the top of the file
 5. Preserve existing component structure
 
-You should ONLY respond with the diff, nothing else, in this format:
+You should ONLY respond with the diff, nothing else, in this format. Don't include any comments, newline markers, etc:
 
 <gnu_diff>
 diff --git a/src/App.tsx b/src/App.tsx
@@ -335,6 +339,34 @@ Important rules for valid GNU diffs:
         projectId: project.id,
         status: 'creating',
         message: 'Repository setup complete',
+      })
+    })
+
+    await step.run('check-domain-status', async () => {
+      const isVerified = await checkDomainStatus(vercelProject.projectId, availableName)
+      if (!isVerified) {
+        throw new Error('Domain verification failed')
+      }
+    })
+
+    // should add the deployment status check and recommits here but this new git commit system seems to be a lot more reliable
+    await step.sleep('wait-for-deployment', 30000)
+
+    await step.run('capture-screenshot', async () => {
+      const screenshotUrl = await captureAndStoreMobileScreenshot(
+        project.id,
+        event.data.userId,
+        `https://${availableName}.usewisp.app`,
+      )
+
+      await updateMobileScreenshot(project.id, screenshotUrl)
+    })
+
+    await step.run('update-project-status', async () => {
+      await updateProjectStatus({
+        projectId: project.id,
+        status: 'deployed',
+        message: 'Project successfully deployed',
       })
     })
   },
