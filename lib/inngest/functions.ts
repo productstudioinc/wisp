@@ -38,17 +38,6 @@ export const createProject = inngest.createFunction(
       return availableName
     })
 
-    const project = await step.run('create-project-in-database', async () => {
-      return await createProjectInDatabase({
-        userId: event.data.userId,
-        name: availableName,
-        description: event.data.description,
-        displayName: event.data.name,
-        projectId: '',
-        private: event.data.private,
-      })
-    })
-
     let questionsContext = ''
     if (event.data.questions) {
       try {
@@ -63,7 +52,7 @@ export const createProject = inngest.createFunction(
       }
     }
 
-    const { text } = await step.ai
+    const { text: description } = await step.ai
       .wrap('generate-description', generateText, {
         model: groq('llama3-8b-8192'),
         prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
@@ -93,6 +82,17 @@ export const createProject = inngest.createFunction(
         }
         throw error
       })
+
+    const project = await step.run('create-project-in-database', async () => {
+      return await createProjectInDatabase({
+        userId: event.data.userId,
+        name: availableName,
+        description: description,
+        displayName: event.data.name,
+        projectId: '',
+        private: event.data.private,
+      })
+    })
 
     const repoUrl = await step.run('create-from-template', async () => {
       await octokit.rest.repos.createUsingTemplate({
