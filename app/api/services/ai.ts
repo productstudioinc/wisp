@@ -4,18 +4,42 @@ import { openai } from '@ai-sdk/openai'
 import type { Octokit } from '@octokit/rest'
 import { anthropic } from '@ai-sdk/anthropic'
 
-export const fileChangeSchema = z.object({
-  changes: z.array(z.object({
-    path: z.string().describe('The path to the file relative to the repository root'),
-    content: z.string().describe('The complete content that should be in this file'),
-    description: z.string().describe('A brief description of what changed in this file')
-  }))
-})
+export const fileChangeSchema = z
+	.object({
+		changes: z
+			.array(
+				z.object({
+					path: z
+						.string()
+						.min(1)
+						.regex(/^[a-zA-Z0-9\-_\/\.]+$/)
+						.describe(
+							'The path to the file relative to the repository root. Must contain only alphanumeric characters, hyphens, underscores, periods, and forward slashes.',
+						),
+					content: z
+						.string()
+						.min(1)
+						.describe(
+							'The complete content that should be in this file. Must include the entire file contents, not just changes.',
+						),
+					description: z
+						.string()
+						.min(10)
+						.max(200)
+						.describe(
+							'A brief description (10-200 chars) explaining what changed in this file and why.',
+						),
+				}),
+			)
+			.min(1)
+			.max(20),
+	})
+	.describe('A collection of file changes to implement the requested features.')
 
 export async function generateCodeChanges(prompt: string, repoContent: string) {
-  const { text: plan } = await generateText({
-    model: anthropic('claude-3-5-sonnet-latest'),
-    prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
+	const { text: plan } = await generateText({
+		model: anthropic('claude-3-5-sonnet-latest'),
+		prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
 
 First, review the content of the template repository:
 
@@ -100,90 +124,107 @@ Implementation Steps:
 Let's implement!"
 
 Ensure that your plan prioritizes mobile-first development, emphasizes type safety, and provides a comprehensive approach to building a high-quality PWA.`,
-    experimental_telemetry: {
-      isEnabled: true
-    }
-  })
+		experimental_telemetry: {
+			isEnabled: true,
+		},
+	})
 
-  // wait 2 seconds
-  await new Promise(resolve => setTimeout(resolve, 2000))
+	// wait 2 seconds
+	await new Promise((resolve) => setTimeout(resolve, 2000))
 
-  const { text: implementation } = await generateText({
-    model: anthropic('claude-3-5-sonnet-latest'),
-    prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app. You must give the FULL file content, not just the changes.`,
-    system: implementationSystemPrompt(),
-    experimental_telemetry: {
-      isEnabled: true
-    },
-    maxRetries: 3
-  })
+	const { text: implementation } = await generateText({
+		model: anthropic('claude-3-5-sonnet-latest'),
+		prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${repoContent}\n\nGenerate the specific code changes needed to implement this app. You must give the FULL file content, not just the changes.`,
+		system: implementationSystemPrompt(),
+		experimental_telemetry: {
+			isEnabled: true,
+		},
+		maxRetries: 3,
+	})
 
-  // wait 2 seconds
-  await new Promise(resolve => setTimeout(resolve, 2000))
+	// wait 2 seconds
+	await new Promise((resolve) => setTimeout(resolve, 2000))
 
-  const { object: changes } = await generateObject({
-    model: openai('gpt-4o-mini'),
-    schema: fileChangeSchema,
-    prompt: `Generate a JSON object structured like this: 
-    
+	const { object: changes } = await generateObject({
+		model: openai('gpt-4o-mini'),
+		schema: fileChangeSchema,
+		prompt: `Based on the implementation plan below, generate a JSON object containing ALL file changes needed. Each change must include:
+
+1. path: The relative file path (e.g. "src/App.tsx", "index.html")
+2. content: The COMPLETE file contents after changes
+3. description: A clear explanation of what changed and why
+
+Implementation plan:
+${implementation}
+
+Requirements:
+- Include ALL necessary files to implement the features
+- Each file's content must be complete and valid
+- File paths must be valid and match the repository structure
+- Descriptions should be clear and specific
+- Maximum 20 files can be changed
+- Focus on essential files only
+
+Example format:
+{
+  "changes": [
     {
-      "changes": [
-        {
-          "path": "string",
-          "content": "string",
-          "description": "string"
-        }
-      ]
+      "path": "src/App.tsx",
+      "content": "// Complete file content here...",
+      "description": "Updated App component to add new feature X and improve mobile layout"
     }
-    
-    based on the following implementation plan: ${implementation}
-    
-    You must give the FULL file content, not just the changes.
-    `,
-  })
+  ]
+}`,
+	})
 
-  console.dir(changes, { depth: null })
+	console.dir(changes, { depth: null })
 
-  return {
-    plan,
-    changes: changes.changes
-  }
+	return {
+		plan,
+		changes: changes.changes,
+	}
 }
 
 export async function applyChangesToFiles(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  changes: z.infer<typeof fileChangeSchema>['changes']
+	octokit: Octokit,
+	owner: string,
+	repo: string,
+	changes: z.infer<typeof fileChangeSchema>['changes'],
 ) {
-  const patchChanges = await Promise.all(changes.map(async file => {
-    return {
-      path: file.path,
-      content: file.content,
-      description: file.description
-    }
-  }))
+	const patchChanges = await Promise.all(
+		changes.map(async (file) => {
+			return {
+				path: file.path,
+				content: file.content,
+				description: file.description,
+			}
+		}),
+	)
 
-  return patchChanges
+	return patchChanges
 }
 
-export async function generateDeploymentErrorFix(repoContent: string, error: string) {
-  console.log('Generating deployment error fix')
-  const { object: implementation } = await generateObject({
-    model: anthropic('claude-3-5-sonnet-latest'),
-    schema: fileChangeSchema,
-    system: implementationSystemPrompt(),
-    prompt: `Fix the following deployment error in this repository:\n\nError: ${error}\n\nRepository content:\n${repoContent}\n\n
+export async function generateDeploymentErrorFix(
+	repoContent: string,
+	error: string,
+) {
+	console.log('Generating deployment error fix')
+	const { object: implementation } = await generateObject({
+		model: anthropic('claude-3-5-sonnet-latest'),
+		schema: fileChangeSchema,
+		system: implementationSystemPrompt(),
+		prompt: `Fix the following deployment error in this repository:\n\nError: ${error}\n\nRepository content:\n${repoContent}\n\n
 Generate the necessary fixes to resolve this deployment error. Focus ONLY on changes that would fix the error.
 Be precise and minimal in your changes. Do not add features or make unrelated modifications.
 
 Only include files that need to be modified to fix the error.`,
-  })
+	})
 
-  return implementation
+	return implementation
 }
 
-const systemPrompt = () => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
+const systemPrompt =
+	() => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
 
 <system_constraints>
 You will be given a template repository that's setup with React and Vite-PWA.
@@ -257,7 +298,8 @@ Tech Stack: React + Vite, LocalStorage for caching, Geolocation API
 Let's implement!"
 </chain_of_thought_instructions>`
 
-export const implementationSystemPrompt = () => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
+export const implementationSystemPrompt =
+	() => `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and PWA (progressive web apps) and highly creative with CSS. Your goal is to take a prompt, and develop an interactive, fun, and fully functional PWA app based on it.
 
 <system_constraints>
 You will be given a template repository that's setup with React and Vite-PWA.
@@ -268,10 +310,11 @@ Technical Limitations:
 - Local storage and PWA capabilities only
 - MAKE SURE your changes are typesafe.
 CRITICAL: Must be fully responsive and mobile-first in UI. So think thoroughly about the UI/UX of the app being completely functional on mobile devices.
-IMPORTANT: Keep all new comopnents in the App.tsx file.
-IMPORTANT: You must not delete anything in the original src/index.css file, you can only add onto it or modify the color values in the @layer base section.
+IMPORTANT: Keep all new components in the App.tsx file You should NOT need to create new files for components.
+IMPORTANT: You must keep all the original tailwind classes in the src/index.css file, you can only add onto it or modify the color values in the @layer base section.
 IMPORTANT: You should ALWAYS change the title of the app in the index.html file to match the name of the app.
 IMPORTANT: You must always keep the PWA logic and the Toaster component in the App.tsx file.
+IMPORTANT: You CANNOT use any dependencies that are not already in our package.json file.
 
 Project Structure Requirements:
 1. Feature Breakdown:

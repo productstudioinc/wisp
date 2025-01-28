@@ -1,148 +1,148 @@
 import { Vercel } from '@vercel/sdk'
 
 export const vercel = new Vercel({
-  bearerToken: process.env.VERCEL_BEARER_TOKEN
+	bearerToken: process.env.VERCEL_BEARER_TOKEN,
 })
 
 export async function setupVercelProject(repoName: string) {
-  try {
-    try {
-      const projects = await vercel.projects.getProjects({
-        teamId: 'product-studio',
-      });
+	try {
+		try {
+			const projects = await vercel.projects.getProjects({
+				teamId: 'product-studio',
+			})
 
-      const existingProject = projects.projects.find(p => p.name === repoName);
+			const existingProject = projects.projects.find((p) => p.name === repoName)
 
-      if (existingProject) {
-        await vercel.projects.deleteProject({
-          idOrName: existingProject.id,
-          teamId: 'product-studio',
-        });
+			if (existingProject) {
+				await vercel.projects.deleteProject({
+					idOrName: existingProject.id,
+					teamId: 'product-studio',
+				})
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    } catch (error) {
-      if (!(error instanceof Error && error.message.includes('not found'))) {
-        throw error;
-      }
-    }
+				await new Promise((resolve) => setTimeout(resolve, 2000))
+			}
+		} catch (error) {
+			if (!(error instanceof Error && error.message.includes('not found'))) {
+				throw error
+			}
+		}
 
-    const createResponse = await vercel.projects.createProject({
-      teamId: 'product-studio',
-      requestBody: {
-        name: repoName,
-        framework: 'vite',
-        gitRepository: {
-          repo: `productstudioinc/${repoName}`,
-          type: 'github'
-        }
-      }
-    })
+		const createResponse = await vercel.projects.createProject({
+			teamId: 'product-studio',
+			requestBody: {
+				name: repoName,
+				framework: 'vite',
+				gitRepository: {
+					repo: `productstudioinc/${repoName}`,
+					type: 'github',
+				},
+			},
+		})
 
-    return {
-      projectId: createResponse.id,
-      deploymentUrl: `https://${repoName}.vercel.app`
-    }
-  } catch (error) {
-    throw error instanceof Error ? error : new Error(String(error))
-  }
+		return {
+			projectId: createResponse.id,
+			deploymentUrl: `https://${repoName}.vercel.app`,
+		}
+	} catch (error) {
+		throw error instanceof Error ? error : new Error(String(error))
+	}
 }
 
-
-export async function addDomainToProject(projectId: string, domainPrefix: string) {
-  try {
-    const result = await vercel.projects.addProjectDomain({
-      idOrName: projectId,
-      teamId: 'product-studio',
-      requestBody: {
-        name: `${domainPrefix}.usewisp.app`,
-      }
-    })
-  } catch (error) {
-    throw error instanceof Error ? error : new Error(String(error))
-  }
+export async function addDomainToProject(
+	projectId: string,
+	domainPrefix: string,
+) {
+	try {
+		const result = await vercel.projects.addProjectDomain({
+			idOrName: projectId,
+			teamId: 'product-studio',
+			requestBody: {
+				name: `${domainPrefix}.usewisp.app`,
+			},
+		})
+	} catch (error) {
+		throw error instanceof Error ? error : new Error(String(error))
+	}
 }
 
-export async function checkDomainStatus(projectId: string, domainPrefix: string) {
-  try {
-    const result = await vercel.projects.verifyProjectDomain({
-      idOrName: projectId,
-      teamId: 'product-studio',
-      domain: `${domainPrefix}.usewisp.app`,
-    })
+export async function checkDomainStatus(
+	projectId: string,
+	domainPrefix: string,
+) {
+	const result = await vercel.projects.verifyProjectDomain({
+		idOrName: projectId,
+		teamId: 'product-studio',
+		domain: `${domainPrefix}.usewisp.app`,
+	})
 
-    return result.verified
-  } catch (error) {
-    throw error instanceof Error ? error : new Error(String(error))
-  }
+	return result.verified
 }
 
 export async function deleteProject(projectId: string) {
-  try {
-    await vercel.projects.deleteProject({
-      idOrName: projectId,
-      teamId: 'product-studio',
-    })
-  } catch (error) {
-    throw error instanceof Error ? error : new Error(String(error))
-  }
+	try {
+		await vercel.projects.deleteProject({
+			idOrName: projectId,
+			teamId: 'product-studio',
+		})
+	} catch (error) {
+		throw error instanceof Error ? error : new Error(String(error))
+	}
 }
 
 export async function checkDeploymentStatus(projectId: string) {
-  try {
-    const deployment = await vercel.deployments.getDeployments({
-      projectId: projectId,
-      teamId: 'product-studio',
-      limit: 1,
-    })
+	try {
+		const deployment = await vercel.deployments.getDeployments({
+			projectId: projectId,
+			teamId: 'product-studio',
+			limit: 1,
+		})
 
+		if (!deployment.deployments.length) {
+			return { state: 'NO_DEPLOYMENTS' }
+		}
 
-    if (!deployment.deployments.length) {
-      return { state: 'NO_DEPLOYMENTS' }
-    }
+		const state = deployment.deployments[0].readyState
 
-    const state = deployment.deployments[0].readyState
+		if (state === 'ERROR') {
+			const deploymentUrl = deployment.deployments[0].url
+			await new Promise((resolve) => setTimeout(resolve, 3000))
+			const response = await fetch(
+				`https://api.vercel.com/v3/deployments/${deploymentUrl}/events?builds=1&direction=backward&follow=0&limit=20`,
+				{
+					headers: {
+						Authorization: `Bearer ${process.env.VERCEL_BEARER_TOKEN}`,
+						'Content-Type': 'application/json',
+					},
+				},
+			)
 
-    if (state === 'ERROR') {
-      const deploymentUrl = deployment.deployments[0].url
-      await new Promise(resolve => setTimeout(resolve, 3000))
-      const response = await fetch(
-        `https://api.vercel.com/v3/deployments/${deploymentUrl}/events?builds=1&direction=backward&follow=0&limit=20`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.VERCEL_BEARER_TOKEN}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      )
+			const deploymentLogs = (await response.json()) as Array<{
+				text: string
+				type: string
+				created: number
+				date: number
+				deploymentId: string
+				id: string
+				serial: string
+				info: {
+					type: string
+					name: string
+					entrypoint: string
+				}
+				level?: 'error'
+			}>
 
-      const deploymentLogs = (await response.json()) as Array<{
-        text: string;
-        type: string;
-        created: number;
-        date: number;
-        deploymentId: string;
-        id: string;
-        serial: string;
-        info: {
-          type: string;
-          name: string;
-          entrypoint: string;
-        };
-        level?: 'error';
-      }>
+			const formattedLogs = deploymentLogs
+				.reverse()
+				.filter((log) => log.level === 'error')
+				.map((log) => log.text)
+				.filter((text) => text)
 
-      const formattedLogs = deploymentLogs
-        .reverse()
-        .filter(log => log.level === 'error')
-        .map(log => log.text)
-        .filter(text => text)
+			return { state, logs: formattedLogs }
+		}
 
-      return { state, logs: formattedLogs }
-    }
-
-    return { state }
-  } catch (error) {
-    throw error instanceof Error ? error : new Error(String(error))
-  }
+		return { state }
+	} catch (error) {
+		throw error instanceof Error ? error : new Error(String(error))
+	}
 }

@@ -1,42 +1,84 @@
-import { checkIfUserExists, createProjectInDatabase, findAvailableProjectName } from "@/app/api/services/db/queries";
-import { inngest } from "./client";
-import { APICallError, generateObject, generateText } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
-import { NonRetriableError, RetryAfterError } from "inngest";
-import octokit from "../services/github";
-import { vercel } from "@/app/api/services/vercel";
-import { cloudflareClient } from "@/app/api/services/cloudflare";
-import { getContent } from "@/app/api/services/github";
-import { fileChangeSchema, implementationSystemPrompt } from "@/app/api/services/ai";
+import {
+	checkIfUserExists,
+	createProjectInDatabase,
+	findAvailableProjectName,
+	updateProjectStatus,
+} from '@/app/api/services/db/queries'
+import { inngest } from './client'
+import {
+	APICallError,
+	CoreTool,
+	generateObject,
+	generateText,
+	StepResult,
+	tool,
+} from 'ai'
+import { anthropic } from '@ai-sdk/anthropic'
+import { NonRetriableError, RetryAfterError } from 'inngest'
+import { openai } from '@ai-sdk/openai'
+import octokit from '../services/github'
+import { checkDomainStatus, vercel } from '@/app/api/services/vercel'
+import { cloudflareClient } from '@/app/api/services/cloudflare'
+import {
+	createCommitWithFiles,
+	createFromTemplate,
+	getContent,
+} from '@/app/api/services/github'
+import {
+	fileChangeSchema,
+	implementationSystemPrompt,
+} from '@/app/api/services/ai'
+import { openai as vercelOpenAI } from '@ai-sdk/openai'
+import type { z } from 'zod'
+import { groq } from '@ai-sdk/groq'
 
 export const createProject = inngest.createFunction(
-  { id: "create-project" },
-  { event: "project/create" },
-  async ({ event, step }) => {
-    await checkIfUserExists(event.data.userId)
+	{
+		id: 'create-project',
+	},
+	{ event: 'project/create' },
+	async ({ event, step }) => {
+		await checkIfUserExists(event.data.userId)
 
-    const formattedName = event.data.name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-    const availableName = await step.run("find-available-name", async () => {
-      const availableName = await findAvailableProjectName(formattedName)
-      return availableName
-    })
+		const formattedName = event.data.name
+			.toLowerCase()
+			.trim()
+			.replace(/\s+/g, '-')
+			.replace(/[^a-z0-9-]/g, '')
+		const availableName = await step.run('find-available-name', async () => {
+			const availableName = await findAvailableProjectName(formattedName)
+			return availableName
+		})
 
-    let questionsContext = ''
-    if (event.data.questions) {
-      try {
-        const questions = JSON.parse(event.data.questions)
-        questionsContext = `\n\nAdditional context from questions:\n${Object.entries(questions)
-          .map(([question, answer]) => `${question}: ${answer}`)
-          .join('\n')
-          }`
-      } catch (e) {
-        console.error('Failed to parse questions:', e)
-      }
-    }
+		const project = await step.run('create-project-in-database', async () => {
+			return await createProjectInDatabase({
+				userId: event.data.userId,
+				name: availableName,
+				description: event.data.description,
+				displayName: event.data.name,
+				projectId: '',
+				private: event.data.private,
+			})
+		})
 
-    const { text } = await step.ai.wrap("generate-description", generateText, {
-      model: anthropic('claude-3-5-sonnet-latest'),
-      prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
+		let questionsContext = ''
+		if (event.data.questions) {
+			try {
+				const questions = JSON.parse(event.data.questions)
+				questionsContext = `\n\nAdditional context from questions:\n${Object.entries(
+					questions,
+				)
+					.map(([question, answer]) => `${question}: ${answer}`)
+					.join('\n')}`
+			} catch (e) {
+				console.error('Failed to parse questions:', e)
+			}
+		}
+
+		const { text } = await step.ai
+			.wrap('generate-description', generateText, {
+				model: groq('llama3-8b-8192'),
+				prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
 
       Description: ${event.data.description}${questionsContext}
 
@@ -50,73 +92,86 @@ export const createProject = inngest.createFunction(
       Questions: Preferred workout type: Weightlifting, Goal: Build muscle mass
       Output: A weightlifting tracker focused on muscle-building progress
 
-      Response format: Just return the concise description, nothing else.`
-    }).catch((error) => {
-      if (APICallError.isInstance(error) && error.responseHeaders) {
-        const rateLimitReset = error.responseHeaders['anthropic-ratelimit-tokens-reset']
-        if (rateLimitReset) {
-          const resetTime = new Date(Number.parseInt(rateLimitReset) * 1000)
-          throw new RetryAfterError(
-            "Hit Anthropic rate limit",
-            resetTime
-          )
-        }
-      }
-      throw error
-    })
+      Response format: Just return the concise description, nothing else.`,
+			})
+			.catch((error) => {
+				if (APICallError.isInstance(error) && error.responseHeaders) {
+					const rateLimitReset =
+						error.responseHeaders['anthropic-ratelimit-tokens-reset']
+					if (rateLimitReset) {
+						const resetTime = new Date(Number.parseInt(rateLimitReset) * 1000)
+						throw new RetryAfterError('Hit Anthropic rate limit', resetTime)
+					}
+				}
+				throw error
+			})
 
-    await step.sleep('wait-for-template-creation', 3000)
+		const repoUrl = await step.run('create-from-template', async () => {
+			await octokit.rest.repos.createUsingTemplate({
+				template_owner: 'productstudioinc',
+				template_repo: 'vite_react_shadcn_pwa',
+				owner: 'productstudioinc',
+				name: availableName,
+				private: false,
+				include_all_branches: false,
+			})
 
-    const vercelProject = await step.run("setup-vercel-project", async () => {
-      const createResponse = await vercel.projects.createProject({
-        teamId: 'product-studio',
-        requestBody: {
-          name: availableName,
-          framework: 'vite',
-          gitRepository: {
-            repo: `productstudioinc/${availableName}`,
-            type: 'github'
-          }
-        }
-      })
+			return `https://github.com/productstudioinc/${availableName}`
+		})
 
-      return {
-        projectId: createResponse.id,
-        deploymentUrl: `https://${availableName}.vercel.app`
-      }
-    })
+		await step.sleep('wait-for-template-creation', 3000)
 
-    await step.run("add-domain-to-project", async () => {
-      await vercel.projects.addProjectDomain({
-        idOrName: vercelProject.projectId,
-        teamId: 'product-studio',
-        requestBody: {
-          name: `${availableName}.usewisp.app`
-        }
-      })
-    })
+		const vercelProject = await step.run('setup-vercel-project', async () => {
+			const createResponse = await vercel.projects.createProject({
+				teamId: 'product-studio',
+				requestBody: {
+					name: availableName,
+					framework: 'vite',
+					gitRepository: {
+						repo: `productstudioinc/${availableName}`,
+						type: 'github',
+					},
+				},
+			})
 
-    const dnsRecord = await step.run("create-dns-record", async () => {
-      const result = await cloudflareClient.dns.records.create({
-        type: 'CNAME',
-        name: availableName,
-        zone_id: process.env.CLOUDFLARE_ZONE_ID as string,
-        proxied: false,
-        content: 'cname.vercel-dns.com.'
-      })
+			return {
+				projectId: createResponse.id,
+				deploymentUrl: `https://${availableName}.vercel.app`,
+			}
+		})
 
-      return result.id
-    })
+		await step.run('add-domain-to-project', async () => {
+			await vercel.projects.addProjectDomain({
+				idOrName: vercelProject.projectId,
+				teamId: 'product-studio',
+				requestBody: {
+					name: `${availableName}.usewisp.app`,
+				},
+			})
+		})
 
-    const githubContent = await step.run("get-github-content", async () => {
-      const repoContent = await getContent(`https://github.com/productstudioinc/${availableName}`)
+		const dnsRecord = await step.run('create-dns-record', async () => {
+			const result = await cloudflareClient.dns.records.create({
+				type: 'CNAME',
+				name: availableName,
+				zone_id: process.env.CLOUDFLARE_ZONE_ID as string,
+				proxied: false,
+				content: 'cname.vercel-dns.com.',
+			})
 
-      return repoContent
-    })
+			return result.id
+		})
 
-    const { text: plan } = await step.ai.wrap("generate-code-plan", generateText, {
-      model: anthropic('claude-3-5-sonnet-latest'),
-      prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
+		const githubContent = await step.run('get-github-content', async () => {
+			return await getContent(repoUrl)
+		})
+
+		const { text: implementationPlan } = await step.ai.wrap(
+			'generate-code-plan',
+			generateText,
+			{
+				model: anthropic('claude-3-5-sonnet-latest'),
+				prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
 
         First, review the content of the template repository:
 
@@ -127,7 +182,7 @@ export const createProject = inngest.createFunction(
         Now, consider the user's app idea:
 
         <user_app_idea>
-        ${prompt}
+        ${event.data.description}
         </user_app_idea>
 
         Before providing your implementation plan, wrap your analysis inside <analysis> tags, considering the following key areas:
@@ -200,13 +255,97 @@ export const createProject = inngest.createFunction(
 
         Let's implement!
       `,
-    })
+			},
+		)
 
-    const { object: implementation } = await step.ai.wrap("generate-code-changes", generateObject, {
-      model: anthropic('claude-3-5-sonnet-latest'),
-      prompt: `Using this implementation plan:\n\n${plan}\n\nAnd this repository content:\n\n${githubContent}\n\nGenerate the specific code changes needed to implement this app. You must give the FULL file content, not just the changes.`,
-      system: implementationSystemPrompt(),
-      schema: fileChangeSchema
-    })
+		const { steps } = (await step.ai.wrap(
+			'generate-code-changes',
+			generateText,
+			{
+				model: anthropic('claude-3-5-sonnet-latest'),
+				prompt: `Based on the implementation plan and repository content, generate the necessary file changes to implement the PWA. I'll provide an example of the expected output format:
 
-  })
+Implementation plan:
+${implementationPlan}
+
+Repository content:
+${githubContent}
+
+Follow these requirements exactly:
+1. Keep all components in App.tsx
+2. Maintain PWA and Toaster logic
+3. Use mobile-first design with Tailwind
+4. Ensure type safety
+5. Use only existing dependencies
+6. Include complete file contents
+7. Follow the example format precisely
+MAKE SURE to keep all the original tailwind variables and classes in the src/index.css file. You can modify them but do NOT remove them.
+
+Generate your implementation now, following the exact structure shown in the example.`,
+				system: implementationSystemPrompt(),
+				tools: {
+					generateImplementationObject: tool({
+						description:
+							'A JSON representation of the file changes needed to implement the app.',
+						parameters: fileChangeSchema,
+					}),
+				},
+				maxSteps: 2,
+				experimental_activeTools: ['generateImplementationObject'],
+			},
+		)) as unknown as {
+			steps: Array<StepResult<Record<string, CoreTool>>>
+		}
+
+		const implementationObject = steps[0].toolCalls[0].args as z.infer<
+			typeof fileChangeSchema
+		>
+
+		console.log(implementationObject)
+
+		const patchFiles = implementationObject.changes.map((change) => ({
+			path: change.path,
+			content: change.content,
+		}))
+
+		await step.run('create-commit', async () => {
+			await createCommitWithFiles(
+				octokit,
+				'productstudioinc',
+				availableName,
+				'main',
+				patchFiles,
+				`feat: ${event.data.description}`,
+			)
+		})
+
+		await step.run('update-project-status', async () => {
+			await updateProjectStatus({
+				projectId: project.id,
+				status: 'creating',
+				message: 'Repository setup complete',
+			})
+		})
+
+		return
+
+		await step.run('update-project-status', async () => {
+			await updateProjectStatus({
+				projectId: project.id,
+				status: 'creating',
+				message: 'Repository setup complete',
+			})
+		})
+
+		await step.run('check-domain-status', async () => {
+			const isVerified = await checkDomainStatus(
+				vercelProject.projectId,
+				availableName,
+			)
+
+			if (!isVerified) {
+				throw new Error('Domain verification failed')
+			}
+		})
+	},
+)
