@@ -39,6 +39,7 @@
     "next-themes": "^0.4.4",
     "octokit": "^4.0.3",
     "openai": "^4.80.1",
+    "parse-diff": "^0.11.1",
     "postgres": "^3.4.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

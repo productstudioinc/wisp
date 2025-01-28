@@ -1,84 +1,70 @@
 import {
-	checkIfUserExists,
-	createProjectInDatabase,
-	findAvailableProjectName,
-	updateProjectStatus,
+  checkIfUserExists,
+  createProjectInDatabase,
+  findAvailableProjectName,
+  updateProjectStatus,
 } from '@/app/api/services/db/queries'
 import { inngest } from './client'
 import {
-	APICallError,
-	CoreTool,
-	generateObject,
-	generateText,
-	StepResult,
-	tool,
+  APICallError,
+  generateText,
 } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
-import { NonRetriableError, RetryAfterError } from 'inngest'
-import { openai } from '@ai-sdk/openai'
-import octokit from '../services/github'
-import { checkDomainStatus, vercel } from '@/app/api/services/vercel'
+import { RetryAfterError } from 'inngest'
+import octokit, { createCommitFromDiff } from '../services/github'
+import { vercel } from '@/app/api/services/vercel'
 import { cloudflareClient } from '@/app/api/services/cloudflare'
-import {
-	createCommitWithFiles,
-	createFromTemplate,
-	getContent,
-} from '@/app/api/services/github'
-import {
-	fileChangeSchema,
-	implementationSystemPrompt,
-} from '@/app/api/services/ai'
-import { openai as vercelOpenAI } from '@ai-sdk/openai'
-import type { z } from 'zod'
+import { getContent } from '@/app/api/services/github'
 import { groq } from '@ai-sdk/groq'
+import { parsePatch, applyPatch } from 'diff'
 
 export const createProject = inngest.createFunction(
-	{
-		id: 'create-project',
-	},
-	{ event: 'project/create' },
-	async ({ event, step }) => {
-		await checkIfUserExists(event.data.userId)
+  {
+    id: 'create-project',
+  },
+  { event: 'project/create' },
+  async ({ event, step }) => {
+    await checkIfUserExists(event.data.userId)
 
-		const formattedName = event.data.name
-			.toLowerCase()
-			.trim()
-			.replace(/\s+/g, '-')
-			.replace(/[^a-z0-9-]/g, '')
-		const availableName = await step.run('find-available-name', async () => {
-			const availableName = await findAvailableProjectName(formattedName)
-			return availableName
-		})
+    const formattedName = event.data.name
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '')
+    const availableName = await step.run('find-available-name', async () => {
+      const availableName = await findAvailableProjectName(formattedName)
+      return availableName
+    })
 
-		const project = await step.run('create-project-in-database', async () => {
-			return await createProjectInDatabase({
-				userId: event.data.userId,
-				name: availableName,
-				description: event.data.description,
-				displayName: event.data.name,
-				projectId: '',
-				private: event.data.private,
-			})
-		})
+    const project = await step.run('create-project-in-database', async () => {
+      return await createProjectInDatabase({
+        userId: event.data.userId,
+        name: availableName,
+        description: event.data.description,
+        displayName: event.data.name,
+        projectId: '',
+        private: event.data.private,
+      })
+    })
 
-		let questionsContext = ''
-		if (event.data.questions) {
-			try {
-				const questions = JSON.parse(event.data.questions)
-				questionsContext = `\n\nAdditional context from questions:\n${Object.entries(
-					questions,
-				)
-					.map(([question, answer]) => `${question}: ${answer}`)
-					.join('\n')}`
-			} catch (e) {
-				console.error('Failed to parse questions:', e)
-			}
-		}
+    let questionsContext = ''
+    if (event.data.questions) {
+      try {
+        const questions = JSON.parse(event.data.questions)
+        questionsContext = `\n\nAdditional context from questions:\n${Object.entries(
+          questions,
+        )
+          .map(([question, answer]) => `${question}: ${answer}`)
+          .join('\n')}`
+      } catch (e) {
+        console.error('Failed to parse questions:', e)
+      }
+    }
 
-		const { text } = await step.ai
-			.wrap('generate-description', generateText, {
-				model: groq('llama3-8b-8192'),
-				prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
+    const { text } = await step.ai
+      .wrap('generate-description', generateText, {
+        model: groq('llama3-8b-8192'),
+        prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
 
       Description: ${event.data.description}${questionsContext}
 
@@ -93,85 +79,85 @@ export const createProject = inngest.createFunction(
       Output: A weightlifting tracker focused on muscle-building progress
 
       Response format: Just return the concise description, nothing else.`,
-			})
-			.catch((error) => {
-				if (APICallError.isInstance(error) && error.responseHeaders) {
-					const rateLimitReset =
-						error.responseHeaders['anthropic-ratelimit-tokens-reset']
-					if (rateLimitReset) {
-						const resetTime = new Date(Number.parseInt(rateLimitReset) * 1000)
-						throw new RetryAfterError('Hit Anthropic rate limit', resetTime)
-					}
-				}
-				throw error
-			})
+      })
+      .catch((error) => {
+        if (APICallError.isInstance(error) && error.responseHeaders) {
+          const rateLimitReset =
+            error.responseHeaders['anthropic-ratelimit-tokens-reset']
+          if (rateLimitReset) {
+            const resetTime = new Date(Number.parseInt(rateLimitReset) * 1000)
+            throw new RetryAfterError('Hit Anthropic rate limit', resetTime)
+          }
+        }
+        throw error
+      })
 
-		const repoUrl = await step.run('create-from-template', async () => {
-			await octokit.rest.repos.createUsingTemplate({
-				template_owner: 'productstudioinc',
-				template_repo: 'vite_react_shadcn_pwa',
-				owner: 'productstudioinc',
-				name: availableName,
-				private: false,
-				include_all_branches: false,
-			})
+    const repoUrl = await step.run('create-from-template', async () => {
+      await octokit.rest.repos.createUsingTemplate({
+        template_owner: 'productstudioinc',
+        template_repo: 'vite_react_shadcn_pwa',
+        owner: 'productstudioinc',
+        name: availableName,
+        private: false,
+        include_all_branches: false,
+      })
 
-			return `https://github.com/productstudioinc/${availableName}`
-		})
+      return `https://github.com/productstudioinc/${availableName}`
+    })
 
-		await step.sleep('wait-for-template-creation', 3000)
+    await step.sleep('wait-for-template-creation', 3000)
 
-		const vercelProject = await step.run('setup-vercel-project', async () => {
-			const createResponse = await vercel.projects.createProject({
-				teamId: 'product-studio',
-				requestBody: {
-					name: availableName,
-					framework: 'vite',
-					gitRepository: {
-						repo: `productstudioinc/${availableName}`,
-						type: 'github',
-					},
-				},
-			})
+    const vercelProject = await step.run('setup-vercel-project', async () => {
+      const createResponse = await vercel.projects.createProject({
+        teamId: 'product-studio',
+        requestBody: {
+          name: availableName,
+          framework: 'vite',
+          gitRepository: {
+            repo: `productstudioinc/${availableName}`,
+            type: 'github',
+          },
+        },
+      })
 
-			return {
-				projectId: createResponse.id,
-				deploymentUrl: `https://${availableName}.vercel.app`,
-			}
-		})
+      return {
+        projectId: createResponse.id,
+        deploymentUrl: `https://${availableName}.vercel.app`,
+      }
+    })
 
-		await step.run('add-domain-to-project', async () => {
-			await vercel.projects.addProjectDomain({
-				idOrName: vercelProject.projectId,
-				teamId: 'product-studio',
-				requestBody: {
-					name: `${availableName}.usewisp.app`,
-				},
-			})
-		})
+    await step.run('add-domain-to-project', async () => {
+      await vercel.projects.addProjectDomain({
+        idOrName: vercelProject.projectId,
+        teamId: 'product-studio',
+        requestBody: {
+          name: `${availableName}.usewisp.app`,
+        },
+      })
+    })
 
-		const dnsRecord = await step.run('create-dns-record', async () => {
-			const result = await cloudflareClient.dns.records.create({
-				type: 'CNAME',
-				name: availableName,
-				zone_id: process.env.CLOUDFLARE_ZONE_ID as string,
-				proxied: false,
-				content: 'cname.vercel-dns.com.',
-			})
+    const dnsRecord = await step.run('create-dns-record', async () => {
+      const result = await cloudflareClient.dns.records.create({
+        type: 'CNAME',
+        name: availableName,
+        zone_id: process.env.CLOUDFLARE_ZONE_ID as string,
+        proxied: false,
+        content: 'cname.vercel-dns.com.',
+      })
 
-			return result.id
-		})
+      return result.id
+    })
 
-		const githubContent = await step.run('get-github-content', async () => {
-			return await getContent(repoUrl)
-		})
+    const githubContent = await step.run('get-github-content', async () => {
+      return await getContent(repoUrl)
+    })
 
-		const { text: implementationPlan } = await step.ai.wrap(
-			'generate-code-plan',
-			generateText,
-			{
-				model: anthropic('claude-3-5-sonnet-latest'),
-				prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
+    const { text: implementationPlan } = await step.ai.wrap(
+      'generate-code-plan',
+      generateText,
+      {
+        model: anthropic('claude-3-5-sonnet-latest'),
+        prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
 
         First, review the content of the template repository:
 
@@ -255,97 +241,101 @@ export const createProject = inngest.createFunction(
 
         Let's implement!
       `,
-			},
-		)
+      },
+    )
 
-		const { steps } = (await step.ai.wrap(
-			'generate-code-changes',
-			generateText,
-			{
-				model: anthropic('claude-3-5-sonnet-latest'),
-				prompt: `Based on the implementation plan and repository content, generate the necessary file changes to implement the PWA. I'll provide an example of the expected output format:
+    const { text: gnuDiff } = (await step.ai.wrap(
+      'generate-code-changes',
+      generateText,
+      {
+        model: anthropic('claude-3-5-sonnet-latest'),
+        prompt: `Based on the implementation plan and repository content, generate a GNU diff that will implement these changes.
 
-Implementation plan:
+<implementation_plan>
 ${implementationPlan}
+</implementation_plan>
 
-Repository content:
-${githubContent}
+<repository_content>
+${githubContent.replace(/^---/gm, '###')}
+</repository_content>
 
-Follow these requirements exactly:
+Requirements:
 1. Keep all components in App.tsx
 2. Maintain PWA and Toaster logic
 3. Use mobile-first design with Tailwind
 4. Ensure type safety
 5. Use only existing dependencies
 6. Include complete file contents
-7. Follow the example format precisely
-MAKE SURE to keep all the original tailwind variables and classes in the src/index.css file. You can modify them but do NOT remove them.
+7. Keep all original tailwind variables and classes in src/index.css
 
-Generate your implementation now, following the exact structure shown in the example.`,
-				system: implementationSystemPrompt(),
-				tools: {
-					generateImplementationObject: tool({
-						description:
-							'A JSON representation of the file changes needed to implement the app.',
-						parameters: fileChangeSchema,
-					}),
-				},
-				maxSteps: 2,
-				experimental_activeTools: ['generateImplementationObject'],
-			},
-		)) as unknown as {
-			steps: Array<StepResult<Record<string, CoreTool>>>
-		}
+When generating diffs for React components:
+1. Always include the full JSX context (parent elements)
+2. Include proper indentation in the diff
+3. Make sure opening and closing tags are in the same hunk
+4. Include imports at the top of the file
+5. Preserve existing component structure
 
-		const implementationObject = steps[0].toolCalls[0].args as z.infer<
-			typeof fileChangeSchema
-		>
+You should ONLY respond with the diff, nothing else, in this format:
 
-		console.log(implementationObject)
+<gnu_diff>
+diff --git a/src/App.tsx b/src/App.tsx
+index 1234567..89abcdef 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,7 +1,8 @@
+ import React from 'react'
+ import { useState } from 'react'
++import { Tabs, TabsContent } from './components/ui/tabs'
+ 
+-export function App() {
++export default function App() {
+   return (
+     <div className="container mx-auto p-4">
+-      <h1>Hello World</h1>
++      <Tabs defaultValue="tab1">
++        <TabsContent value="tab1">
++          <h1>Hello World</h1>
++        </TabsContent>
++      </Tabs>
+     </div>
+   )
+ }
+</gnu_diff>
 
-		const patchFiles = implementationObject.changes.map((change) => ({
-			path: change.path,
-			content: change.content,
-		}))
+Important rules for valid GNU diffs:
+1. Each file change must start with "diff --git a/path b/path"
+2. Include the index line with hex hashes
+3. Include --- and +++ lines with a/ and b/ prefixes
+4. Each hunk must start with @@ and show correct line numbers
+5. Use - for removals, + for additions, space for context
+6. Include 3 lines of context around changes
+7. Ensure proper indentation is preserved
+8. Make sure all JSX tags are properly closed
+9. Keep complete component structure intact
+10. No trailing whitespace at end of lines`,
+      },
+    ))
 
-		await step.run('create-commit', async () => {
-			await createCommitWithFiles(
-				octokit,
-				'productstudioinc',
-				availableName,
-				'main',
-				patchFiles,
-				`feat: ${event.data.description}`,
-			)
-		})
+    const diff = gnuDiff
+      .split('<gnu_diff>')[1]
+      ?.split('</gnu_diff>')[0]
+      ?.trim() || ''
 
-		await step.run('update-project-status', async () => {
-			await updateProjectStatus({
-				projectId: project.id,
-				status: 'creating',
-				message: 'Repository setup complete',
-			})
-		})
+    await step.run('create-commit', async () => {
+      await createCommitFromDiff({
+        owner: 'productstudioinc',
+        repo: availableName,
+        diff,
+        message: `feat: ${event.data.description}`,
+      })
+    })
 
-		return
-
-		await step.run('update-project-status', async () => {
-			await updateProjectStatus({
-				projectId: project.id,
-				status: 'creating',
-				message: 'Repository setup complete',
-			})
-		})
-
-		await step.run('check-domain-status', async () => {
-			const isVerified = await checkDomainStatus(
-				vercelProject.projectId,
-				availableName,
-			)
-
-			if (!isVerified) {
-				throw new Error('Domain verification failed')
-			}
-		})
-	},
+    await step.run('update-project-status', async () => {
+      await updateProjectStatus({
+        projectId: project.id,
+        status: 'creating',
+        message: 'Repository setup complete',
+      })
+    })
+  },
 )

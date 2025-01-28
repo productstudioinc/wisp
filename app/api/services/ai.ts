@@ -11,28 +11,17 @@ export const fileChangeSchema = z
 				z.object({
 					path: z
 						.string()
-						.min(1)
-						.regex(/^[a-zA-Z0-9\-_\/\.]+$/)
-						.describe(
-							'The path to the file relative to the repository root. Must contain only alphanumeric characters, hyphens, underscores, periods, and forward slashes.',
-						),
+						.describe('The path to the file relative to the repository root'),
 					content: z
 						.string()
-						.min(1)
-						.describe(
-							'The complete content that should be in this file. Must include the entire file contents, not just changes.',
-						),
+						.describe('The complete content that should be in this file'),
 					description: z
 						.string()
-						.min(10)
-						.max(200)
-						.describe(
-							'A brief description (10-200 chars) explaining what changed in this file and why.',
-						),
+						.describe('A brief description of what changed in this file'),
 				}),
 			)
 			.min(1)
-			.max(20),
+			.describe('Array of file changes to implement the requested features'),
 	})
 	.describe('A collection of file changes to implement the requested features.')
 
