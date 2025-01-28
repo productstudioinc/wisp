@@ -5,7 +5,7 @@ import {
   updateMobileScreenshot,
   updateProjectDetails,
   updateProjectStatus,
-} from '@/app/api/services/db/queries'
+} from '@/lib/db/queries'
 import { inngest } from './client'
 import {
   APICallError,
@@ -13,12 +13,11 @@ import {
 } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { RetryAfterError } from 'inngest'
-import octokit, { createCommitFromDiff } from '../services/github'
-import { checkDomainStatus, vercel } from '@/app/api/services/vercel'
-import { cloudflareClient } from '@/app/api/services/cloudflare'
-import { getContent } from '@/app/api/services/github'
+import octokit, { createCommitFromDiff, getContent } from '../services/github'
+import { checkDomainStatus, vercel } from '../services/vercel'
+import { cloudflareClient } from '../services/cloudflare'
 import { groq } from '@ai-sdk/groq'
-import { captureAndStoreMobileScreenshot } from '@/app/api/services/screenshot'
+import { captureAndStoreMobileScreenshot } from '../services/screenshot'
 
 export const createProject = inngest.createFunction(
   {
