@@ -1,12 +1,17 @@
-import { chromium } from 'playwright';
 import { supabase } from './supabase';
+import chromium from "@sparticuz/chromium";
+import playwright from "playwright-core";
 
 export async function captureAndStoreMobileScreenshot(
   projectId: string,
   userId: string,
   url: string
 ): Promise<string> {
-  const browser = await chromium.launch();
+  const executablePath = await chromium.executablePath();
+  const browser = await playwright.chromium.launch({
+    executablePath,
+    headless: true
+  });
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2,
