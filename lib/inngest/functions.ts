@@ -3,6 +3,7 @@ import {
   createProjectInDatabase,
   findAvailableProjectName,
   updateMobileScreenshot,
+  updateProjectDetails,
   updateProjectStatus,
 } from '@/app/api/services/db/queries'
 import { inngest } from './client'
@@ -17,7 +18,6 @@ import { checkDomainStatus, vercel } from '@/app/api/services/vercel'
 import { cloudflareClient } from '@/app/api/services/cloudflare'
 import { getContent } from '@/app/api/services/github'
 import { groq } from '@ai-sdk/groq'
-import { parsePatch, applyPatch } from 'diff'
 import { captureAndStoreMobileScreenshot } from '@/app/api/services/screenshot'
 
 export const createProject = inngest.createFunction(
@@ -148,6 +148,15 @@ export const createProject = inngest.createFunction(
       })
 
       return result.id
+    })
+
+    await step.run('update-project-details', async () => {
+      await updateProjectDetails({
+        projectId: project.id,
+        vercelProjectId: vercelProject.projectId,
+        dnsRecordId: dnsRecord || undefined,
+        customDomain: `${availableName}.usewisp.app`,
+      })
     })
 
     const githubContent = await step.run('get-github-content', async () => {

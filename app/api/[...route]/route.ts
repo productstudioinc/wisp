@@ -23,6 +23,7 @@ import {
 	getUserProjects,
 	getProjectByName,
 	findAvailableProjectName,
+	createProjectInDatabase,
 } from '../services/db/queries'
 import { generateObject, generateText, streamText } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
@@ -189,7 +190,7 @@ Output: A weightlifting tracker focused on muscle-building progress
 Response format: Just return the concise description, nothing else.`,
 		})
 
-		const project = await createProject({
+		const project = await createProjectInDatabase({
 			userId: result.userId,
 			name: availableName,
 			description: conciseDescription.text,

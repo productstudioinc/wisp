@@ -341,12 +341,7 @@ export async function updateProjectDetails({
 		.limit(1)
 
 	if (!project.length) {
-		throw createError(
-			'PROJECT_NOT_FOUND',
-			`Project with ID "${projectId}" not found`,
-			'updateProjectDetails',
-			{ projectId },
-		)
+		throw new NonRetriableError('Project not found')
 	}
 
 	const updatedProject = await db
