@@ -1,6 +1,6 @@
 import { openai } from "@ai-sdk/openai";
-import { z } from "@content-collections/core";
-import { generateObject, generateText } from "ai";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 export async function POST(request: Request) {
   const body = await request.json();
