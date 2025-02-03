@@ -20,106 +20,6 @@ export interface CreateCommitFromDiffOptions {
 	message: string
 }
 
-export async function createCommitFromDiff({
-	owner,
-	repo,
-	diff,
-	message,
-}: CreateCommitFromDiffOptions): Promise<void> {
-	// Get repository info
-	const { data: repoData } = await octokit.rest.repos.get({
-		owner,
-		repo,
-	})
-
-	const defaultBranch = repoData.default_branch
-
-	// Get the latest commit
-	const { data: ref } = await octokit.rest.git.getRef({
-		owner,
-		repo,
-		ref: `heads/${defaultBranch}`,
-	})
-
-	const latestCommitSha = ref.object.sha
-
-	// Get the tree of the latest commit
-	const { data: latestCommit } = await octokit.rest.git.getCommit({
-		owner,
-		repo,
-		commit_sha: latestCommitSha,
-	})
-
-	// Create blobs for each file
-	const treeItems = []
-	const diffSections = diff.split('diff --git ')
-		.filter(section => section.trim())
-		.map(section => `diff --git ${section.trim()}`)
-
-	for (const section of diffSections) {
-		const fileMatch = section.match(/^diff --git a\/(.*?) b\//)
-		if (!fileMatch) continue
-
-		const filePath = fileMatch[1]
-		const contentLines = section.split('\n')
-
-		// Find the content start after the header lines
-		const contentStartIndex = contentLines.findIndex(line => line.startsWith('@@'))
-		if (contentStartIndex === -1) continue
-
-		// Extract the content, removing diff markers
-		const newContent = contentLines
-			.slice(contentStartIndex + 1)
-			.filter(line => !line.startsWith('@@'))
-			.map(line => {
-				if (line.startsWith('+')) return line.slice(1)
-				if (line.startsWith('-')) return null
-				return line
-			})
-			.filter(line => line !== null)
-			.join('\n')
-
-		// Create a blob for the file content
-		const { data: blob } = await octokit.rest.git.createBlob({
-			owner,
-			repo,
-			content: newContent,
-			encoding: 'utf-8',
-		})
-
-		treeItems.push({
-			path: filePath,
-			mode: '100644' as const,
-			type: 'blob' as const,
-			sha: blob.sha,
-		})
-	}
-
-	// Create a new tree with all changes
-	const { data: newTree } = await octokit.rest.git.createTree({
-		owner,
-		repo,
-		base_tree: latestCommit.tree.sha,
-		tree: treeItems,
-	})
-
-	// Create the commit
-	const { data: newCommit } = await octokit.rest.git.createCommit({
-		owner,
-		repo,
-		message,
-		tree: newTree.sha,
-		parents: [latestCommitSha],
-	})
-
-	// Update the branch reference
-	await octokit.rest.git.updateRef({
-		owner,
-		repo,
-		ref: `heads/${defaultBranch}`,
-		sha: newCommit.sha,
-	})
-}
 
 export default octokit
 
@@ -257,4 +157,127 @@ export async function getContent(url: string): Promise<string> {
 		.join('\n')}`
 
 	return repoContent
+}
+
+export async function getTrimmedContent(url: string): Promise<string> {
+	const urlParts = url.replace('https://github.com/', '').split('/')
+	const owner = urlParts[0]
+	const repo = urlParts[1]
+
+	const specificFiles = ['index.html', 'vite.config.ts', 'src/App.tsx', 'src/index.css']
+	const files: { path: string; content: string }[] = []
+
+	for (const filePath of specificFiles) {
+		try {
+			const content = await fetchFileContent(octokit, owner, repo, filePath)
+			files.push({
+				path: filePath,
+				content,
+			})
+		} catch (error: any) {
+			console.warn(`Could not fetch ${filePath}: ${error.message}`)
+		}
+	}
+
+	const repoContent = `Files:\n${files
+		.map(
+			(f: { path: string; content: string }) =>
+				`\n--- ${f.path} ---\n${f.content}`,
+		)
+		.join('\n')}`
+
+	return repoContent
+}
+
+export async function createCommitFromDiff({
+	owner,
+	repo,
+	diff,
+	message,
+}: CreateCommitFromDiffOptions) {
+	// Get the default branch
+	const { data: repository } = await octokit.rest.repos.get({
+		owner,
+		repo,
+	})
+	const defaultBranch = repository.default_branch
+
+	// Get the latest commit SHA
+	const { data: ref } = await octokit.rest.git.getRef({
+		owner,
+		repo,
+		ref: `heads/${defaultBranch}`,
+	})
+	const parentSha = ref.object.sha
+
+	// Get the current tree
+	const { data: commit } = await octokit.rest.git.getCommit({
+		owner,
+		repo,
+		commit_sha: parentSha,
+	})
+	const baseSha = commit.tree.sha
+
+	// Parse the XML-style file contents
+	const files: { path: string; content: string }[] = []
+	const regex = /<([^>]+)>\n([\s\S]*?)\n<\/\1>/g
+	let match: RegExpExecArray | null = null
+
+	do {
+		match = regex.exec(diff)
+		if (match) {
+			const [, filePath, content] = match
+			if (filePath && content) {
+				files.push({
+					path: filePath,
+					content: content.trim(),
+				})
+			}
+		}
+	} while (match)
+
+	// Create blobs for each file
+	const blobs = await Promise.all(
+		files.map(async (file) => {
+			const { data: blob } = await octokit.rest.git.createBlob({
+				owner,
+				repo,
+				content: file.content,
+				encoding: 'utf-8',
+			})
+			return {
+				path: file.path,
+				sha: blob.sha,
+				mode: '100644' as const,
+				type: 'blob' as const,
+			}
+		}),
+	)
+
+	// Create a new tree
+	const { data: newTree } = await octokit.rest.git.createTree({
+		owner,
+		repo,
+		base_tree: baseSha,
+		tree: blobs,
+	})
+
+	// Create a new commit
+	const { data: newCommit } = await octokit.rest.git.createCommit({
+		owner,
+		repo,
+		message,
+		tree: newTree.sha,
+		parents: [parentSha],
+	})
+
+	// Update the reference
+	await octokit.rest.git.updateRef({
+		owner,
+		repo,
+		ref: `heads/${defaultBranch}`,
+		sha: newCommit.sha,
+	})
+
+	return newCommit.sha
 }
