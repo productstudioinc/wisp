@@ -258,3 +258,33 @@ export async function getContent(url: string): Promise<string> {
 
 	return repoContent
 }
+
+export async function getTrimmedContent(url: string): Promise<string> {
+	const urlParts = url.replace('https://github.com/', '').split('/')
+	const owner = urlParts[0]
+	const repo = urlParts[1]
+
+	const specificFiles = ['index.html', 'vite.config.ts', 'src/App.tsx', 'src/index.css']
+	const files: { path: string; content: string }[] = []
+
+	for (const filePath of specificFiles) {
+		try {
+			const content = await fetchFileContent(octokit, owner, repo, filePath)
+			files.push({
+				path: filePath,
+				content,
+			})
+		} catch (error: any) {
+			console.warn(`Could not fetch ${filePath}: ${error.message}`)
+		}
+	}
+
+	const repoContent = `Files:\n${files
+		.map(
+			(f: { path: string; content: string }) =>
+				`\n--- ${f.path} ---\n${f.content}`,
+		)
+		.join('\n')}`
+
+	return repoContent
+}
