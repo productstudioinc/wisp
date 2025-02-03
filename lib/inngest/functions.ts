@@ -13,7 +13,7 @@ import {
 } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { RetryAfterError } from 'inngest'
-import octokit, { createCommitFromDiff, getContent } from '../services/github'
+import octokit, { createCommitFromDiff, getContent, getTrimmedContent } from '../services/github'
 import { checkDomainStatus, vercel } from '../services/vercel'
 import { cloudflareClient } from '../services/cloudflare'
 import { groq } from '@ai-sdk/groq'
@@ -159,185 +159,97 @@ export const createProject = inngest.createFunction(
     })
 
     const githubContent = await step.run('get-github-content', async () => {
-      return await getContent(repoUrl)
+      return await getTrimmedContent(repoUrl)
     })
 
-    const { text: implementationPlan } = await step.ai.wrap(
-      'generate-code-plan',
-      generateText,
-      {
-        model: anthropic('claude-3-5-sonnet-latest'),
-        prompt: `You are wisp, an expert AI assistant and exceptional senior software developer with vast knowledge in React, Vite, and Progressive Web Apps (PWAs). Your goal is to develop an interactive, fun, and fully functional PWA based on a user's prompt. You excel in mobile-first design and creative CSS implementations.
+    const { text: implementationPlan } = await step.ai.wrap('generate-implementation-plan', generateText, {
+      model: anthropic('claude-3-5-sonnet-latest'),
+      system:
+        `You are Wisp, an AI assistant that is an expert at React, Vite, Shadcn, and PWAs.
+      Your job is to plan the implementation of an app that will be requested by a user.
+      This plan should go based off the following github template repository:
+      ${githubContent}
 
-        First, review the content of the template repository:
+      This has the following files:
 
-        <repository_content>
-        ${githubContent}
-        </repository_content>
+      index.html
+      vite.config.ts
+      src/App.tsx
+      src/index.css
 
-        Now, consider the user's app idea:
+      The user will provide an app request, and you will need to plan the implementation of that app.
+      You will need to consider the overall context of the project when planning the implementation.
 
-        <user_app_idea>
-        ${event.data.description}
-        </user_app_idea>
+      You have rules that you must follow: 
 
-        Before providing your implementation plan, wrap your analysis inside <analysis> tags, considering the following key areas:
+      - Based on the feature request, edit the index.html head and the manifest section of vite.config.ts to reflect the new app being created.
+      - Based on the feature request, edit the src/App.tsx file to reflect the new app being created.
+      - In the App.tsx, you MUST use the RootLayout.tsx file and import as is - you can only add code inside of the <RootLayout> tag.
+      - In the App.tsx you MUST export the App component as default.
+      - Based on the feature request, create a styling plan for the app. For all styling, you must keep the tailwind class name imports as well as the varaibles from the original repo. You can edit the colors of the variables or add onto, but not remove any existing tailwind classes.
+      - You must use tailwind styling throughout the app.
 
-        1. Features & Components:
-          - List core features to implement (minimum 5)
-          - Prioritize features based on user needs and PWA best practices
-          - Identify key React components needed (minimum 3)
-          - Note PWA-specific features (minimum 2)
+      CRITICAL: in index.html you can ONLY edit the title and meta in the head tag.
 
-        2. Design Strategy:
-          - Propose a color scheme and theme
-          - Outline the layout structure
-          - Detail mobile-first considerations
-          - Describe key UI/UX elements
-          - Brainstorm creative UI/UX ideas specific to the app concept
+      Your design must be mobile-first, styling it as if its a real mobile app.
 
-        3. Technical Considerations:
-          - List required dependencies
-          - Explain your state management approach
-          - Detail your local storage strategy
-          - Describe performance optimizations
-          - Outline your approach to ensuring type safety
+      Your implementation should be very in depth, using features like localstorage for data storage, and other features that are relevant to the feature request.
+      
+      You will have access to the following ShadCN components:
+      accordion.tsx
+      button.tsx
+      card.tsx
+      checkbox.tsx
+      dropdown-menu.tsx
+      input.tsx
+      label.tsx
+      radio-group.tsx
+      scroll-area.tsx
+      select.tsx
+      sonner.tsx
+      tabs.tsx
+      textarea.tsx
+      theme-provider.tsx
 
-        4. Mobile-First PWA Development:
-          - Describe touch-friendly interface elements
-          - Explain responsive design strategies
-          - Detail offline functionality
-          - Outline PWA-specific optimizations
+      You can use these components to implement the feature, but you must follow the rules above.
 
-        5. Challenges and Solutions:
-          - Identify potential technical or design challenges
-          - Propose solutions or mitigation strategies for each challenge
+      Your output should be structured like this:
 
-        After your thorough analysis, provide a detailed implementation plan using the following format:
+      <think>
+      Your thought process on how to implement the feature.
+      </think>
 
-        "I'll create this [type] PWA with:
+      <files>
+      <index.html>
+      [Complete content of index.html file]
+      </index.html>
 
-        Features:
-        1. [Feature 1]
-        2. [Feature 2]
-        3. [Feature 3]
-        4. [Feature 4]
-        5. [Feature 5]
+      <vite.config.ts>
+      [Complete content of vite.config.ts file]
+      </vite.config.ts>
 
-        Design:
-        - Color Scheme: [color palette]
-        - Layout: [layout description]
-        - Mobile-First Elements: [key mobile design considerations]
-        - UI/UX Highlights: [notable UI/UX features]
-
-        Tech Stack:
-        - Framework: React + Vite
-        - State Management: [chosen approach]
-        - Data Persistence: [storage strategy]
-        - Performance Optimizations: [key optimizations]
-        - Type Safety Measures: [approach to ensure type safety]
-
-        Mobile PWA Enhancements:
-        - Touch Interface: [touch-friendly features]
-        - Responsive Design: [responsive strategies]
-        - Offline Capabilities: [offline functionality]
-        - PWA Optimizations: [PWA-specific enhancements]
-
-        Implementation Steps:
-        1. [Step 1]
-        2. [Step 2]
-        3. [Step 3]
-        ...
-
-        Let's implement!
+      <src/App.tsx>
+      [Complete content of App.tsx file]
+      </src/App.tsx>
+      </files>
       `,
-      },
-    )
+      prompt: `Analyze this feature request and create an implementation plan:
+    ${event.data.description}
 
-    const { text: gnuDiff } = (await step.ai.wrap(
-      'generate-code-changes',
-      generateText,
-      {
-        model: anthropic('claude-3-5-sonnet-latest'),
-        prompt: `Based on the implementation plan and repository content, generate a GNU diff that will implement these changes.
+    Consider the overall feature context:
+    ${githubContent}`,
+    })
 
-<implementation_plan>
-${implementationPlan}
-</implementation_plan>
+    const filesMatch = implementationPlan.match(/<files>([\s\S]*?)<\/files>/)
+    const files = filesMatch ? filesMatch[1].trim() : ''
 
-<repository_content>
-${githubContent.replace(/^---/gm, '###')}
-</repository_content>
-
-Requirements:
-1. Keep all components in App.tsx
-2. Keep the PWA logic in the App.tsx
-3. Use mobile-first design with Tailwind
-4. Ensure type safety
-5. Use only existing dependencies
-6. Include complete file contents
-7. Keep all original tailwind variables and classes in src/index.css
-
-CRITICAL: You MUST keep the isPWA and Toaster logic in the App.tsx
-
-When generating diffs for React components:
-1. Always include the full JSX context (parent elements)
-2. Include proper indentation in the diff
-3. Make sure opening and closing tags are in the same hunk
-4. Include imports at the top of the file
-5. Preserve existing component structure
-
-You should ONLY respond with the diff, nothing else, in this format. Don't include any comments, newline markers, etc:
-
-<gnu_diff>
-diff --git a/src/App.tsx b/src/App.tsx
-index 1234567..89abcdef 100644
---- a/src/App.tsx
-+++ b/src/App.tsx
-@@ -1,7 +1,8 @@
- import React from 'react'
- import { useState } from 'react'
-+import { Tabs, TabsContent } from './components/ui/tabs'
- 
--export function App() {
-+export default function App() {
-   return (
-     <div className="container mx-auto p-4">
--      <h1>Hello World</h1>
-+      <Tabs defaultValue="tab1">
-+        <TabsContent value="tab1">
-+          <h1>Hello World</h1>
-+        </TabsContent>
-+      </Tabs>
-     </div>
-   )
- }
-</gnu_diff>
-
-Important rules for valid GNU diffs:
-1. Each file change must start with "diff --git a/path b/path"
-2. Include the index line with hex hashes
-3. Include --- and +++ lines with a/ and b/ prefixes
-4. Each hunk must start with @@ and show correct line numbers
-5. Use - for removals, + for additions, space for context
-6. Include 3 lines of context around changes
-7. Ensure proper indentation is preserved
-8. Make sure all JSX tags are properly closed
-9. Keep complete component structure intact
-10. No trailing whitespace at end of lines`,
-      },
-    ))
-
-    const diff = gnuDiff
-      .split('<gnu_diff>')[1]
-      ?.split('</gnu_diff>')[0]
-      ?.trim() || ''
+    console.log(files)
 
     await step.run('create-commit', async () => {
       await createCommitFromDiff({
         owner: 'productstudioinc',
         repo: availableName,
-        diff,
+        diff: files,
         message: `feat: ${event.data.description}`,
       })
     })
