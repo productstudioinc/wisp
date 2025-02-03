@@ -194,6 +194,9 @@ export const createProject = inngest.createFunction(
       Your design must be mobile-first, styling it as if its a real mobile app.
 
       Your implementation should be very in depth, using features like localstorage for data storage, and other features that are relevant to the feature request.
+
+      Make sure everything is typesafe, ignoring common errors like:
+      Type 'Timeout' is not assignable to type 'number'.
       
       You will have access to the following ShadCN components:
       accordion.tsx
