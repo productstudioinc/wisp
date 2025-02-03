@@ -7,27 +7,33 @@ export async function captureAndStoreMobileScreenshot(
   userId: string,
   url: string
 ): Promise<string> {
-  const executablePath = await chromium.executablePath();
-  const browser = await playwright.chromium.launch({
-    executablePath,
-    headless: true
-  });
-  const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    deviceScaleFactor: 2,
-    isMobile: true,
-    hasTouch: true,
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-    colorScheme: 'dark',
-    serviceWorkers: 'allow',
-    permissions: ['notifications'],
-    javaScriptEnabled: true,
-    bypassCSP: true,
-  });
-
-  const page = await context.newPage();
+  let browser: playwright.Browser | undefined;
+  let context: playwright.BrowserContext | undefined;
+  let page: playwright.Page | undefined;
 
   try {
+    const executablePath = await chromium.executablePath();
+
+    browser = await playwright.chromium.launch({
+      executablePath,
+      headless: true
+    });
+
+    context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      deviceScaleFactor: 2,
+      isMobile: true,
+      hasTouch: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+      colorScheme: 'dark',
+      serviceWorkers: 'allow',
+      permissions: ['notifications'],
+      javaScriptEnabled: true,
+      bypassCSP: true,
+    });
+
+    page = await context.newPage();
+
     await page.addInitScript(() => {
       Object.defineProperty(window.navigator, 'standalone', {
         get: () => true,
@@ -44,10 +50,10 @@ export async function captureAndStoreMobileScreenshot(
       });
     });
 
-    await new Promise(resolve => setTimeout(resolve, 5000))
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
-    console.log('Taking screenshot of:', url)
-    await page.goto(url, { waitUntil: 'networkidle' });
+    console.log('Taking screenshot of:', url);
+    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(2000);
 
     const screenshot = await page.screenshot({
@@ -71,9 +77,12 @@ export async function captureAndStoreMobileScreenshot(
       .getPublicUrl(fileName);
 
     return publicUrl;
+  } catch (error) {
+    console.error('Screenshot capture error:', error);
+    throw error;
   } finally {
-    await page.close();
-    await context.close();
-    await browser.close();
+    if (page) await page?.close().catch(console.error);
+    if (context) await context?.close().catch(console.error);
+    if (browser) await browser?.close().catch(console.error);
   }
 } 
