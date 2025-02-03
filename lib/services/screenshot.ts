@@ -12,11 +12,13 @@ export async function captureAndStoreMobileScreenshot(
   let page: playwright.Page | undefined;
 
   try {
+    // Configure Chrome specifically for AWS Lambda
     const executablePath = await chromium.executablePath();
 
     browser = await playwright.chromium.launch({
       executablePath,
-      headless: true
+      args: chromium.args,
+      headless: true,
     });
 
     context = await browser.newContext({
@@ -26,36 +28,19 @@ export async function captureAndStoreMobileScreenshot(
       hasTouch: true,
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
       colorScheme: 'dark',
-      serviceWorkers: 'allow',
-      permissions: ['notifications'],
+      serviceWorkers: 'block', // Block service workers to prevent hanging
       javaScriptEnabled: true,
       bypassCSP: true,
     });
 
     page = await context.newPage();
 
-    await page.addInitScript(() => {
-      Object.defineProperty(window.navigator, 'standalone', {
-        get: () => true,
-      });
-      window.matchMedia = (query: string): MediaQueryList => ({
-        matches: query === '(display-mode: standalone)',
-        media: query,
-        onchange: null,
-        addListener: () => { },
-        removeListener: () => { },
-        addEventListener: () => { },
-        removeEventListener: () => { },
-        dispatchEvent: () => true
-      });
+    await page.goto(url, {
+      waitUntil: 'networkidle',
+      timeout: 15000
     });
 
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
-    console.log('Taking screenshot of:', url);
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(2000);
-
+    // Take screenshot immediately after load
     const screenshot = await page.screenshot({
       type: 'jpeg',
       quality: 80,
@@ -63,14 +48,17 @@ export async function captureAndStoreMobileScreenshot(
     });
 
     const fileName = `${userId}/${projectId}/screenshot.jpg`;
-    const { error } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from('project-screenshots')
       .upload(fileName, screenshot, {
         contentType: 'image/jpeg',
         upsert: true
       });
 
-    if (error) throw error;
+    if (uploadError) {
+      console.error('Screenshot upload error:', uploadError);
+      throw uploadError;
+    }
 
     const { data: { publicUrl } } = supabase.storage
       .from('project-screenshots')
@@ -81,8 +69,13 @@ export async function captureAndStoreMobileScreenshot(
     console.error('Screenshot capture error:', error);
     throw error;
   } finally {
-    if (page) await page?.close().catch(console.error);
-    if (context) await context?.close().catch(console.error);
-    if (browser) await browser?.close().catch(console.error);
+    // Clean up resources immediately
+    try {
+      if (page) await page.close();
+      if (context) await context.close();
+      if (browser) await browser.close();
+    } catch (cleanupError) {
+      console.error('Cleanup error:', cleanupError);
+    }
   }
 } 
