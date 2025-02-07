@@ -16,9 +16,8 @@ import { RetryAfterError } from 'inngest'
 import octokit, { createCommitFromDiff, getContent, getTrimmedContent } from '../services/github'
 import { checkDomainStatus, vercel } from '../services/vercel'
 import { cloudflareClient } from '../services/cloudflare'
-import { groq } from '@ai-sdk/groq'
 import { captureAndStoreMobileScreenshot } from '../services/screenshot'
-
+import { openai } from '@ai-sdk/openai'
 export const createProject = inngest.createFunction(
   {
     id: 'create-project',
@@ -53,7 +52,7 @@ export const createProject = inngest.createFunction(
 
     const { text: description } = await step.ai
       .wrap('generate-description', generateText, {
-        model: groq('llama3-8b-8192'),
+        model: openai('gpt-4o-mini'),
         prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
 
       Description: ${event.data.description}${questionsContext}
