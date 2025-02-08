@@ -22,9 +22,17 @@ type ProjectUpdateEvent = {
 	}
 }
 
+type ProjectDeleteEvent = {
+	data: {
+		id: string
+		userId: string
+	}
+}
+
 type Events = {
 	'project/create': ProjectCreateEvent
 	'project/update': ProjectUpdateEvent
+	'project/delete': ProjectDeleteEvent
 }
 
 export const schemas = new EventSchemas().fromRecord<Events>()

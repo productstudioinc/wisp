@@ -425,3 +425,65 @@ export const updateProject = inngest.createFunction(
     })
   },
 )
+
+export const deleteProject = inngest.createFunction(
+  {
+    id: 'delete-project',
+  },
+  { event: 'project/delete' },
+  async ({ event, step }) => {
+    await checkIfUserExists(event.data.userId)
+
+    const project = await step.run('check-project-ownership', async () => {
+      const project = await getProject(event.data.id)
+      if (!project || project.userId !== event.data.userId) {
+        throw new Error('Project not found or user does not have permission')
+      }
+      return project
+    })
+
+    await step.run('update-project-status', async () => {
+      await updateProjectStatus({
+        projectId: project.id,
+        status: 'deploying',
+        message: 'Starting project deletion',
+      })
+    })
+
+    await step.run('delete-vercel-project', async () => {
+      await vercel.projects.deleteProject({
+        teamId: 'product-studio',
+        idOrName: project.vercelProjectId,
+      })
+    })
+
+    await step.run('delete-github-repo', async () => {
+      await octokit.rest.repos.delete({
+        owner: 'productstudioinc',
+        repo: project.name,
+      })
+    })
+
+    if (project.dnsRecordId) {
+      await step.run('delete-dns-record', async () => {
+        await cloudflareClient.delete(
+          `/zones/${process.env.CLOUDFLARE_ZONE_ID}/dns_records/${project.dnsRecordId}`,
+          {
+            headers: {
+              'X-Auth-Email': process.env.CLOUDFLARE_EMAIL as string,
+              'X-Auth-Key': process.env.CLOUDFLARE_API_KEY as string,
+            }
+          }
+        )
+      })
+    }
+
+    await step.run('update-project-status', async () => {
+      await updateProjectStatus({
+        projectId: project.id,
+        status: 'deleted',
+        message: 'Project successfully deleted',
+      })
+    })
+  },
+)

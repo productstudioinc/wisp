@@ -41,4 +41,35 @@ export async function PUT(
       { status: 400 }
     )
   }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: { projectId: string } }
+) {
+  try {
+    const project = await getProject(params.projectId)
+    if (!project) {
+      return Response.json(
+        { error: "Project not found" },
+        { status: 404 }
+      )
+    }
+
+    await inngest.send({
+      name: "project/delete",
+      data: {
+        id: params.projectId,
+        userId: project.userId,
+      }
+    })
+
+    return new Response(null, { status: 200 })
+  } catch (error) {
+    console.error('Error deleting project:', error)
+    return Response.json(
+      { error: "Failed to delete project" },
+      { status: 400 }
+    )
+  }
 } 
