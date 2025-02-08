@@ -9,10 +9,11 @@ const updateProjectSchema = zfd.formData({
 
 export async function PUT(
   request: Request,
-  { params }: { params: { projectId: string } }
+  { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const project = await getProject(params.projectId)
+    const { projectId } = await params
+    const project = await getProject(projectId)
     if (!project) {
       return Response.json(
         { error: "Project not found" },
@@ -26,7 +27,7 @@ export async function PUT(
     await inngest.send({
       name: "project/update",
       data: {
-        id: params.projectId,
+        id: projectId,
         name: project.name,
         description: result.description,
         userId: project.userId,
@@ -45,10 +46,11 @@ export async function PUT(
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { projectId: string } }
+  { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const project = await getProject(params.projectId)
+    const { projectId } = await params
+    const project = await getProject(projectId)
     if (!project) {
       return Response.json(
         { error: "Project not found" },
@@ -59,7 +61,7 @@ export async function DELETE(
     await inngest.send({
       name: "project/delete",
       data: {
-        id: params.projectId,
+        id: projectId,
         userId: project.userId,
       }
     })
