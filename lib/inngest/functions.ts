@@ -18,6 +18,7 @@ import { checkDomainStatus, vercel } from '../services/vercel'
 import { cloudflareClient } from '../services/cloudflare'
 import { captureAndStoreMobileScreenshot } from '../services/screenshot'
 import { openai } from '@ai-sdk/openai'
+import { google } from '@ai-sdk/google'
 export const createProject = inngest.createFunction(
   {
     id: 'create-project',
@@ -52,7 +53,7 @@ export const createProject = inngest.createFunction(
 
     const { text: description } = await step.ai
       .wrap('generate-description', generateText, {
-        model: openai('gpt-4o-mini'),
+        model: google("gemini-2.0-flash-lite-preview-02-05"),
         prompt: `Given this app description and any additional context from questions, generate a clear and personalized 1-sentence description that captures the core purpose and any personal customization details of the app. Make it brief but informative, and include any personal details that make it unique to the user.
 
       Description: ${event.data.description}${questionsContext}
@@ -244,8 +245,6 @@ export const createProject = inngest.createFunction(
 
     const filesMatch = implementationPlan.match(/<files>([\s\S]*?)<\/files>/)
     const files = filesMatch ? filesMatch[1].trim() : ''
-
-    console.log(files)
 
     await step.run('create-commit', async () => {
       await createCommitFromDiff({
