@@ -2,6 +2,7 @@ import {
   checkIfUserExists,
   createProjectInDatabase,
   findAvailableProjectName,
+  getProject,
   updateMobileScreenshot,
   updateProjectDetails,
   updateProjectStatus,
@@ -13,12 +14,12 @@ import {
 } from 'ai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { RetryAfterError } from 'inngest'
-import octokit, { createCommitFromDiff, getContent, getTrimmedContent } from '../services/github'
+import octokit, { createCommitFromDiff, getTrimmedContent } from '../services/github'
 import { checkDomainStatus, vercel } from '../services/vercel'
 import { cloudflareClient } from '../services/cloudflare'
 import { captureAndStoreMobileScreenshot } from '../services/screenshot'
-import { openai } from '@ai-sdk/openai'
 import { google } from '@ai-sdk/google'
+
 export const createProject = inngest.createFunction(
   {
     id: 'create-project',
@@ -288,6 +289,138 @@ export const createProject = inngest.createFunction(
         projectId: project.id,
         status: 'deployed',
         message: 'Project successfully deployed',
+      })
+    })
+  },
+)
+
+export const updateProject = inngest.createFunction(
+  {
+    id: 'update-project',
+  },
+  { event: 'project/update' },
+  async ({ event, step }) => {
+    await checkIfUserExists(event.data.userId)
+
+    const project = await step.run('check-project-ownership', async () => {
+      const project = await getProject(event.data.id)
+      if (!project || project.userId !== event.data.userId) {
+        throw new Error('Project not found or user does not have permission')
+      }
+      return project
+    })
+
+    await step.run('update-project-status', async () => {
+      await updateProjectStatus({
+        projectId: project.id,
+        status: 'deploying',
+        message: 'Starting project update',
+      })
+    })
+
+    const githubContent = await step.run('get-github-content', async () => {
+      const repoUrl = `https://github.com/productstudioinc/${project.name}`
+      return await getTrimmedContent(repoUrl)
+    })
+
+    const { text: implementationPlan } = await step.ai.wrap('generate-implementation-plan', generateText, {
+      model: anthropic('claude-3-5-sonnet-latest'),
+      system:
+        `You are Wisp, an AI assistant that is an expert at React, Vite, Shadcn, and PWAs.
+      Your job is to plan the implementation of an app that will be requested by a user.
+      This plan should go based off the following github repository content:
+      ${githubContent}
+
+      You have rules that you must follow: 
+
+      - Based on the feature request, edit the index.html head and the manifest section of vite.config.ts to reflect the new app being created.
+      - Based on the feature request, edit the src/App.tsx file to reflect the new app being created.
+      - In the App.tsx, you MUST use the RootLayout.tsx file and import as is - you can only add code inside of the <RootLayout> tag.
+      - In the App.tsx you MUST export the App component as default.
+      - Based on the feature request, create a styling plan for the app. For all styling, you must keep the tailwind class name imports as well as the varaibles from the original repo. You can edit the colors of the variables or add onto, but not remove any existing tailwind classes.
+      - You must use tailwind styling throughout the app.
+
+      CRITICAL: in index.html you can ONLY edit the title and meta in the head tag.
+
+      Your design must be mobile-first, styling it as if its a real mobile app.
+
+      Your implementation should be very in depth, using features like localstorage for data storage, and other features that are relevant to the feature request.
+
+      Make sure everything is typesafe, ignoring common errors like:
+      Type 'Timeout' is not assignable to type 'number'.
+      
+      You will have access to the following ShadCN components:
+      accordion.tsx
+      button.tsx
+      card.tsx
+      checkbox.tsx
+      dropdown-menu.tsx
+      input.tsx
+      label.tsx
+      radio-group.tsx
+      scroll-area.tsx
+      select.tsx
+      sonner.tsx
+      tabs.tsx
+      textarea.tsx
+      theme-provider.tsx
+
+      Your output should be structured like this:
+
+      <think>
+      Your thought process on how to implement the feature.
+      </think>
+
+      <files>
+      <index.html>
+      [Complete content of index.html file]
+      </index.html>
+
+      <vite.config.ts>
+      [Complete content of vite.config.ts file]
+      </vite.config.ts>
+
+      <src/App.tsx>
+      [Complete content of App.tsx file]
+      </src/App.tsx>
+      </files>
+      `,
+      prompt: `Analyze this feature request and create an implementation plan based on the existing repository content:
+    ${event.data.description}
+
+    Consider the overall feature context:
+    ${githubContent}`,
+    })
+
+    const filesMatch = implementationPlan.match(/<files>([\s\S]*?)<\/files>/)
+    const files = filesMatch ? filesMatch[1].trim() : ''
+
+    await step.run('create-commit', async () => {
+      await createCommitFromDiff({
+        owner: 'productstudioinc',
+        repo: project.name,
+        diff: files,
+        message: `feat: ${event.data.description}`,
+      })
+    })
+
+    await step.sleep('wait-for-deployment', 30000)
+
+    await step.run('capture-screenshot', async () => {
+      const screenshotUrl = await captureAndStoreMobileScreenshot(
+        project.id,
+        event.data.userId,
+        `https://${project.name}.usewisp.app`,
+      )
+
+      await updateMobileScreenshot(project.id, screenshotUrl)
+    })
+
+    await step.run('update-project-status', async () => {
+      await updateProjectStatus({
+        projectId: project.id,
+        status: 'deployed',
+        message: 'Project successfully updated',
       })
     })
   },
