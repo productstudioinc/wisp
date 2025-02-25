@@ -164,7 +164,7 @@ export const createProject = inngest.createFunction(
     })
 
     const { text: implementationPlan } = await step.ai.wrap('generate-implementation-plan', generateText, {
-      model: anthropic('claude-3-7-sonnet-20250219'),
+      model: anthropic('claude-3-5-sonnet-latest'),
       system: `You are Wisp, an AI assistant that is an expert at React, Vite, Shadcn, and PWAs.
 Your task is to implement user-requested apps based on our template repository:
 ${githubContent}
