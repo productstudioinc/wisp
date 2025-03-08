@@ -1,4 +1,1 @@
-```
-npm install
-npm run dev
-```
+landing page / backend for https://github.com/productstudioinc/wisp-app
